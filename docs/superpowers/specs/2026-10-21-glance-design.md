@@ -256,6 +256,11 @@ Storage: Windows `%ProgramData%\Glance\` (`settings.json`, `layouts/`, `assets/`
   device they were made for (the importer asks which rotation they were authored with,
   default 0°) and normalised to layout orientation so all backgrounds behave alike.
   Users import their own files; none are shipped.
+  Observed facts: the vendor tool keeps user themes at
+  `C:\TRCCCAP\Data\USBLCD\Theme<W><H>\<name>\Theme.zt` (e.g. `Theme1280480\001b\Theme.zt`,
+  253 frames, ~41 ms apart, ~60 KB JPEGs). On the owner's unit — a panel that needs 180°
+  rotation for Glance-rendered images — these `.zt` frames displayed correctly when sent
+  unrotated, i.e. they are device-oriented and must be imported with authored rotation 180°.
 
 ### 7.3 Frame pipeline (per display session)
 - **Overlay layer** (all items) is rendered once per second, or immediately when the
@@ -362,10 +367,9 @@ OFL or similar. Sensor bindings auto-resolve on first run (first CPU, first GPU)
 
 ## 11a. Starting code
 The research spikes (HID handshake/frames, LHM + PawnIO probe, SkiaSharp rendering)
-were written from scratch for this project, not derived from vendor code, and may be
-used as reference. They are rewritten into the real project structure rather than
-copied wholesale, and must carry no references to the vendor software or research
-paths.
+proved the approach; every fact they established is recorded in this document. They
+live outside the repository and are **not needed** to build Glance — the builder works
+from this spec alone and writes the code fresh.
 
 ## 12. Testing
 
@@ -392,7 +396,7 @@ v1, signing later.
   ≤5% animated).
 - Role-based sensor bindings for themes; missing values render as `—`.
 - 90°/270° means portrait canvas; mismatched layouts scale-to-fit with a warning.
-- Spikes reusable as reference, rewritten cleanly.
+- Research spikes stay outside the repo; this spec carries everything they proved.
 - Self-contained win-x64 build; GitHub Releases first, winget later.
 - Multiple screens supported, each with its own layout.
 - GIF and .zt converted on import; .zt rotation asked at import (default 0°).
