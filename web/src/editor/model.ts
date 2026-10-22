@@ -87,6 +87,13 @@ export function duplicateItem(layout: Layout, id: string): Layout {
   };
 }
 
+/** Appends an item (drawn on top) at a whole-pixel, in-bounds position, under a new id if its id is taken. */
+export function addItem(layout: Layout, item: Item): Layout {
+  let id = item.id;
+  while (layout.items.some((i) => i.id === id)) id = newId();
+  return { ...layout, items: [...layout.items, { ...item, id, x: clampPos(item.x), y: clampPos(item.y) }] };
+}
+
 /** Shallow-merges `patch` into the item; `id` and `type` cannot be changed. */
 export function updateItem(layout: Layout, id: string, patch: Partial<Item>): Layout {
   return mapItem(layout, id, (i) => ({ ...i, ...patch, id: i.id, type: i.type }) as Item);

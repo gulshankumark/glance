@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { DeviceView, Item, Layout, LayoutSummary } from '../src/api/types';
+import type { DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
@@ -19,6 +19,8 @@ export interface MockApiOptions {
   eventsFail?: boolean;
   /** HTTP status of GET /api/preview/{key}.jpg (default 200 with a tiny JPEG); may be changed while a test runs. */
   previewStatus?: 200 | 404;
+  /** GET /api/sensors answer (default: three sensors and two roles, see defaultSensors). */
+  sensors?: SensorsResponse;
 }
 
 export interface MockApiHandle {
@@ -134,7 +136,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const renders: Layout[] = [];
 
-  const defaultSensors = {
+  const defaultSensors: SensorsResponse = options.sensors ?? {
     sensors: [
       {
         id: 'cpu/t',

@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api/client';
-import type { DeviceView, Layout, LayoutSummary } from '../api/types';
+import type { DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../api/types';
 import { Canvas } from '../editor/Canvas';
-import { newLayout } from '../editor/model';
+import editorStyles from '../editor/Editor.module.css';
+import { addItem, newLayout, sensorItem } from '../editor/model';
+import { SensorTree } from '../editor/SensorTree';
 import { useDevices } from '../live/LiveProvider';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
@@ -70,6 +72,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const [busy, setBusy] = useState(false);
   /** Changes whenever another layout is opened, so the canvas starts without the previous layout's preview. */
   const [openCount, setOpenCount] = useState(0);
+  const [catalog, setCatalog] = useState<SensorsResponse | null>(null);
   const loaded = useRef<Promise<{ layouts: LayoutSummary[]; devices: DeviceView[] }> | null>(null);
 
   if (!loaded.current) {
@@ -94,6 +97,18 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
       setSummaries(layouts);
       setDevices((prev) => prev ?? list);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<SensorsResponse>('GET', '/api/sensors')
+      .then((c) => !cancelled && setCatalog(c))
+      .catch(() => {
+        // the tree keeps saying "Loading"; a 401 is handled by the client
+      });
     return () => {
       cancelled = true;
     };
@@ -159,6 +174,14 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     } catch (e) {
       if (seq === openSeq.current) setNotice(errorText(e, `Layout ${name} could not be opened.`));
     }
+  };
+
+  /** Adds an item on top of the draft and selects it. */
+  const insert = (item: Item) => {
+    if (!doc) return;
+    const draft = addItem(doc.draft, item);
+    setDoc({ ...doc, draft });
+    setSelectedId(draft.items[draft.items.length - 1].id);
   };
 
   const dirty = doc !== null && (doc.savedName === null || JSON.stringify(doc.draft) !== doc.saved);
@@ -378,7 +401,18 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
               selectedId={selectedId}
               onSelect={setSelectedId}
               onChange={(draft) => setDoc((d) => d && { ...d, draft })}
+              onDropSensor={(ref, label, x, y) => insert(sensorItem(ref, label, x, y))}
             />
+
+            <div className={editorStyles.panels}>
+              <section className={editorStyles.panel} aria-label="Sensors">
+                <h3 className={editorStyles.panelTitle}>Sensors</h3>
+                <SensorTree
+                  catalog={catalog}
+                  onAdd={(ref, label) => insert(sensorItem(ref, label, doc.draft.width / 2, doc.draft.height / 2))}
+                />
+              </section>
+            </div>
           </>
         )}
       </Card>

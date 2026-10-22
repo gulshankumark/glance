@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ITEM_TYPES, defaultItem, duplicateItem, moveItem, newLayout, removeItem, sensorItem, toLayoutPoint, updateItem,
+  ITEM_TYPES, addItem, defaultItem, duplicateItem, moveItem, newLayout, removeItem, sensorItem, toLayoutPoint, updateItem,
 } from './model';
 import type { Item, Layout } from './model';
 import { LIMITS, fieldsFor } from './schema';
@@ -119,6 +119,17 @@ describe('layout operations', () => {
     duplicateItem(l, id);
     updateItem(l, id, { x: 9 });
     expect(l).toEqual(snapshot);
+  });
+
+  it('addItem appends on top, rounds and clamps the position and keeps ids unique', () => {
+    const l = base();
+    const added = addItem(l, { ...defaultItem('clock', 10.4, 99999), id: idA(l) });
+    expect(added.items).toHaveLength(3);
+    expect(added.items[2]).toMatchObject({ type: 'clock', x: 10, y: 8192 });
+    expect(added.items[2].id).not.toBe(idA(l));
+    const fresh = defaultItem('text', 1, 2);
+    expect(addItem(l, fresh).items[2]).toEqual(fresh);
+    expect(l.items).toHaveLength(2);
   });
 
   it('leaves untouched items shared', () => {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api, ApiError, postBlob } from '../api/client';
 import type { Item, Layout } from '../api/types';
+import { SENSOR_DRAG_TYPE } from './catalog';
 import { duplicateItem, moveItem, removeItem, toLayoutPoint } from './model';
 import { createRenderScheduler, type RenderScheduler } from './scheduler';
 
@@ -122,6 +123,10 @@ export interface CanvasProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onChange: (layout: Layout) => void;
+  /** A sensor from the sensor tree was dropped at (x, y) in layout pixels. */
+  onDropSensor?: (ref: string, label: string, x: number, y: number) => void;
+  /** Accessible name of an item's selection box. */
+  itemName?: (item: Item) => string;
 }
 
 interface Drag {
@@ -135,14 +140,14 @@ interface Drag {
  * The layout as the server draws it, scaled to the available width, with a selection box over every item:
  * click selects, drag moves, arrows nudge (Shift: 10 px), Delete removes, Ctrl/Cmd+D duplicates.
  */
-export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, onChange }) => {
+export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, onChange, onDropSensor, itemName }) => {
   const { rendered, error } = useRenderedDraft(layout);
   const stageRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const dragRef = useRef<Drag | null>(null);
 
-  const pointAt = (e: React.PointerEvent) => {
+  const pointAt = (e: { clientX: number; clientY: number }) => {
     const l = layoutRef.current;
     return toLayoutPoint(e.clientX, e.clientY, stageRef.current!.getBoundingClientRect(), l.width, l.height);
   };
@@ -195,6 +200,27 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
     }
   };
 
+  const onDragOver = (e: React.DragEvent) => {
+    if (!onDropSensor || !e.dataTransfer.types.includes(SENSOR_DRAG_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    const data = e.dataTransfer.getData(SENSOR_DRAG_TYPE);
+    if (!onDropSensor || !data) return;
+    e.preventDefault();
+    try {
+      const { ref, label } = JSON.parse(data) as { ref: unknown; label: unknown };
+      if (typeof ref !== 'string' || !ref || typeof label !== 'string') return;
+      const p = pointAt(e);
+      stageRef.current?.focus({ preventScroll: true });
+      onDropSensor(ref, label, p.x, p.y);
+    } catch {
+      // not ours
+    }
+  };
+
   const pct = (v: number, of: number) => `${(v / of) * 100}%`;
 
   return (
@@ -205,6 +231,8 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
         tabIndex={0}
         aria-label={`Canvas of ${layout.name}`}
         onKeyDown={onKeyDown}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         onPointerDown={(e) => {
           if (e.button === 0) onSelect(null);
         }}
@@ -240,7 +268,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
               data-testid={`item-box-${item.id}`}
               role="button"
               tabIndex={-1}
-              aria-label={`${item.type} ${item.id}`}
+              aria-label={itemName ? itemName(item) : `${item.type} ${item.id}`}
               aria-pressed={selected}
               onPointerDown={(e) => onBoxPointerDown(e, item)}
               onPointerMove={onBoxPointerMove}
