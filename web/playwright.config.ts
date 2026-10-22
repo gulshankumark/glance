@@ -14,10 +14,11 @@ export default defineConfig({
     channel: 'msedge',
   },
   webServer: {
-    command: 'npm run preview -- --port 4173',
+    // Always test the current sources: build first, never reuse a preview server that may serve an older bundle.
+    command: 'npm run build && npm run preview -- --port 4173 --strictPort',
     port: 4173,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
+    reuseExistingServer: false,
+    timeout: 120000,
   },
   projects: [
     {
