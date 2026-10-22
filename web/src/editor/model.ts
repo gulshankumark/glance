@@ -94,6 +94,14 @@ export function addItem(layout: Layout, item: Item): Layout {
   return { ...layout, items: [...layout.items, { ...item, id, x: clampPos(item.x), y: clampPos(item.y) }] };
 }
 
+/** The item moved to the middle of the layout: a sized box centred (never left of 0), a text anchor at the centre. */
+export function centered(item: Item, layout: Pick<Layout, 'width' | 'height'>): Item {
+  const at = (len: number, size: number) => Math.max(0, Math.round((len - size) / 2));
+  return 'width' in item
+    ? { ...item, x: at(layout.width, item.width), y: at(layout.height, item.height) }
+    : { ...item, x: Math.round(layout.width / 2), y: Math.round(layout.height / 2) };
+}
+
 /** Shallow-merges `patch` into the item; `id` and `type` cannot be changed. */
 export function updateItem(layout: Layout, id: string, patch: Partial<Item>): Layout {
   return mapItem(layout, id, (i) => ({ ...i, ...patch, id: i.id, type: i.type }) as Item);

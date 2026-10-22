@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../src/api/types';
+import type { Asset, DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
@@ -21,6 +21,8 @@ export interface MockApiOptions {
   previewStatus?: 200 | 404;
   /** GET /api/sensors answer (default: three sensors and two roles, see defaultSensors). */
   sensors?: SensorsResponse;
+  /** Stored assets (default: seedAssets()). */
+  assets?: Asset[];
 }
 
 export interface MockApiHandle {
@@ -35,6 +37,8 @@ export interface MockApiHandle {
   layouts: Map<string, Layout>;
   /** Bodies of the POST /api/render requests so far. */
   renders: () => Layout[];
+  /** The stored assets (uploads are appended). */
+  assets: Asset[];
   /** The highest number of POST /api/render fetches the page had pending (not answered, not aborted) at once. */
   maxRendersInFlight: () => Promise<number>;
 }
@@ -62,6 +66,14 @@ export function seedLayouts(): Layout[] {
       name: 'Gaming', width: 1280, height: 480, background: { type: 'color', color: '#000000' },
       items: [{ type: 'clock', id: 'clock', x: 500, y: 200, timeZone: 'local', font: mockFont(64), color: '#FFFFFF', align: 'left' }],
     },
+  ];
+}
+
+/** Seed assets: an image "img1" (320×240) and a GIF animation "anim1". */
+export function seedAssets(): Asset[] {
+  return [
+    { id: 'img1', kind: 'image', width: 320, height: 240, frameCount: 1 },
+    { id: 'anim1', kind: 'gif', width: 320, height: 240, frameCount: 12 },
   ];
 }
 
@@ -135,6 +147,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       .map((l) => ({ name: l.name, width: l.width, height: l.height, error: null }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const renders: Layout[] = [];
+  const assets: Asset[] = options.assets ? [...options.assets] : seedAssets();
 
   const defaultSensors: SensorsResponse = options.sensors ?? {
     sensors: [
@@ -417,6 +430,18 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path === '/api/assets' && method === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(assets) });
+      return;
+    }
+
+    const thumbMatch = /^\/api\/assets\/([^/]+)\/thumbnail\.jpg$/.exec(path);
+    if (thumbMatch && method === 'GET') {
+      const known = assets.some((a) => a.id === decodeURIComponent(thumbMatch[1]));
+      await route.fulfill(known ? { status: 200, contentType: 'image/jpeg', body: dummyJpeg } : { status: 404, body: '' });
+      return;
+    }
+
     if (path === '/api/health') {
       await route.fulfill({
         status: 200,
@@ -439,6 +464,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     options: opts,
     devices,
     layouts,
+    assets,
     renders: () => [...renders],
     maxRendersInFlight: () =>
       page.evaluate(() => (window as unknown as { __maxRendersInFlight: number }).__maxRendersInFlight),

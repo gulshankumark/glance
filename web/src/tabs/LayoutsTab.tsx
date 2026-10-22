@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api/client';
-import type { DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../api/types';
+import type { DeviceView, Item, Layout, LayoutSummary } from '../api/types';
+import { AddMenu } from '../editor/AddMenu';
 import { Canvas } from '../editor/Canvas';
 import editorStyles from '../editor/Editor.module.css';
 import { addItem, newLayout, sensorItem } from '../editor/model';
 import { SensorTree } from '../editor/SensorTree';
+import { useEditorData } from '../editor/useEditorData';
 import { useDevices } from '../live/LiveProvider';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
@@ -72,7 +74,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const [busy, setBusy] = useState(false);
   /** Changes whenever another layout is opened, so the canvas starts without the previous layout's preview. */
   const [openCount, setOpenCount] = useState(0);
-  const [catalog, setCatalog] = useState<SensorsResponse | null>(null);
+  const { catalog, assets } = useEditorData();
   const loaded = useRef<Promise<{ layouts: LayoutSummary[]; devices: DeviceView[] }> | null>(null);
 
   if (!loaded.current) {
@@ -97,18 +99,6 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
       setSummaries(layouts);
       setDevices((prev) => prev ?? list);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    api<SensorsResponse>('GET', '/api/sensors')
-      .then((c) => !cancelled && setCatalog(c))
-      .catch(() => {
-        // the tree keeps saying "Loading"; a 401 is handled by the client
-      });
     return () => {
       cancelled = true;
     };
@@ -394,6 +384,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                 Made for {doc.draft.width}×{doc.draft.height} — {target.name} shows {targetSize.width}×{targetSize.height}.
               </Banner>
             )}
+
+            <AddMenu layout={doc.draft} catalog={catalog} assets={assets} onInsert={insert} />
 
             <Canvas
               key={openCount}

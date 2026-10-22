@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ITEM_TYPES, addItem, defaultItem, duplicateItem, moveItem, newLayout, removeItem, sensorItem, toLayoutPoint, updateItem,
+  ITEM_TYPES, addItem, centered, defaultItem, duplicateItem, moveItem, newLayout, removeItem, sensorItem, toLayoutPoint, updateItem,
 } from './model';
 import type { Item, Layout } from './model';
 import { LIMITS, fieldsFor } from './schema';
@@ -130,6 +130,14 @@ describe('layout operations', () => {
     const fresh = defaultItem('text', 1, 2);
     expect(addItem(l, fresh).items[2]).toEqual(fresh);
     expect(l.items).toHaveLength(2);
+  });
+
+  it('centered puts a box in the middle and a text anchor at the centre point', () => {
+    const l = newLayout('L', 1280, 480);
+    expect(centered(defaultItem('bar', 0, 0), l)).toMatchObject({ x: 490, y: 228 });
+    expect(centered(defaultItem('clock', 0, 0), l)).toMatchObject({ x: 640, y: 240 });
+    const huge = { ...defaultItem('image', 0, 0), width: 2000, height: 100 } as Item;
+    expect(centered(huge, l)).toMatchObject({ x: 0, y: 190 });
   });
 
   it('leaves untouched items shared', () => {

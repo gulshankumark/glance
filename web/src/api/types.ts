@@ -199,3 +199,12 @@ export interface Layout {
   background: Background;
   items: Item[];
 }
+
+/** GET /api/assets item, POST /api/assets answer. `image` for image items/backgrounds, `gif`/`zt` for animations. */
+export interface Asset {
+  id: string;
+  kind: 'image' | 'gif' | 'zt';
+  width: number;
+  height: number;
+  frameCount: number;
+}
