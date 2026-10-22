@@ -1,19 +1,34 @@
+// Mirrors docs/api.md (the API contract); src/api/types.test.ts checks the documented examples.
+
+export type DeviceStatus = 'connected' | 'unsupported' | 'retrying';
+export type Rotation = 0 | 90 | 180 | 270;
+
+/** GET /api/devices item, PUT /api/devices/{key} response, `devices` event item. */
 export interface DeviceView {
   key: string;
-  driver?: string;
-  driverId?: string;
-  serial?: string;
+  driverId: string;
+  name: string;
+  status: DeviceStatus;
+  width: number;
+  height: number;
+  modelCode: string;
+  serial: string;
+  message: string | null;
+  /** ISO time or null. */
+  nextRetry: string | null;
+  rotation: Rotation;
+  activeLayout: string | null;
+  layoutMismatch: boolean;
+  fps: number;
+  framesSent: number;
+}
+
+/** GET /api/layouts item; a layout file that cannot be loaded has width/height 0 and `error` set. */
+export interface LayoutSummary {
   name: string;
   width: number;
   height: number;
-  rotation: 0 | 90 | 180 | 270;
-  status: 'connected' | 'unsupported' | 'retrying';
-  message: string | null;
-  nextRetry: string | null;
-  activeLayout: string | null;
-  layoutMismatch?: boolean;
-  fps?: number;
-  framesSent?: number;
+  error: string | null;
 }
 
 export interface Sensor {

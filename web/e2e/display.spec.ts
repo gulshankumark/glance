@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
-import { mockApi } from './mockApi';
+import { mockApi, seedDevice } from './mockApi';
 
 test.beforeEach(async () => {
   if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
@@ -119,24 +119,7 @@ test.describe('Display Tab', () => {
 
   test('first-run call to action without active layout', async ({ page }) => {
     await mockApi(page, {
-      devices: [
-        {
-          key: 'thermalright-hid-5302_SER1',
-          driver: 'thermalright-hid-5302',
-          serial: 'SER1',
-          name: 'Thermalright 1280x480 LCD',
-          width: 1280,
-          height: 480,
-          rotation: 0,
-          status: 'connected',
-          message: null,
-          nextRetry: null,
-          activeLayout: null,
-          layoutMismatch: false,
-          fps: 0,
-          framesSent: 0,
-        },
-      ],
+      devices: [seedDevice({ activeLayout: null, fps: 0, framesSent: 0 })],
     });
     await page.goto('/#display');
 

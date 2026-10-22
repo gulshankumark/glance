@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { DeviceView } from '../src/api/types';
+import type { DeviceView, LayoutSummary } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
@@ -7,7 +7,7 @@ export interface MockApiOptions {
   loopback?: boolean;
   password?: string;
   devices?: DeviceView[];
-  layouts?: Array<{ name: string; width: number; height: number }>;
+  layouts?: LayoutSummary[];
   /** The mock event stream fails (error instead of open) on every connection attempt. */
   eventsFail?: boolean;
 }
@@ -34,6 +34,28 @@ const dummyJpeg = Buffer.from([
   0x00, 0xbf, 0x80, 0xff, 0xd9
 ]);
 
+/** The seed device (a connected 1280×480 screen showing "Default"), with optional overrides. */
+export function seedDevice(overrides: Partial<DeviceView> = {}): DeviceView {
+  return {
+    key: 'thermalright-hid-5302_SER1',
+    driverId: 'thermalright-hid-5302',
+    name: 'Thermalright 1280x480 LCD',
+    status: 'connected',
+    width: 1280,
+    height: 480,
+    modelCode: '5302',
+    serial: 'SER1',
+    message: null,
+    nextRetry: null,
+    rotation: 0,
+    activeLayout: 'Default',
+    layoutMismatch: false,
+    fps: 10.0,
+    framesSent: 1234,
+    ...overrides,
+  };
+}
+
 export async function mockApi(page: Page, options: MockApiOptions = {}): Promise<MockApiHandle> {
   const opts: MockApiOptions = {
     authenticated: true,
@@ -45,28 +67,11 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
 
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
 
-  const devices: DeviceView[] = options.devices !== undefined ? [...options.devices] : [
-    {
-      key: 'thermalright-hid-5302_SER1',
-      driver: 'thermalright-hid-5302',
-      serial: 'SER1',
-      name: 'Thermalright 1280x480 LCD',
-      width: 1280,
-      height: 480,
-      rotation: 0,
-      status: 'connected',
-      message: null,
-      nextRetry: null,
-      activeLayout: 'Default',
-      layoutMismatch: false,
-      fps: 10.0,
-      framesSent: 1234,
-    },
-  ];
+  const devices: DeviceView[] = options.devices !== undefined ? [...options.devices] : [seedDevice()];
 
   const layouts = options.layouts !== undefined ? [...options.layouts] : [
-    { name: 'Default', width: 1280, height: 480 },
-    { name: 'Gaming', width: 1280, height: 480 },
+    { name: 'Default', width: 1280, height: 480, error: null },
+    { name: 'Gaming', width: 1280, height: 480, error: null },
   ];
 
   const defaultSensors = {
