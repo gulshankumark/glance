@@ -106,27 +106,52 @@ test.describe('App Shell', () => {
   });
 
   test('reconnecting banner shows when events drop and hides after reconnect', async ({ page }) => {
-    await mockApi(page);
+    const api = await mockApi(page);
     await page.goto('/#display');
 
-    // When connection drops or status is reconnecting
-    // We verify banner behavior through live status simulation
-    const banner = page.locator('[data-testid="reconnecting-banner"]');
-    await expect(banner).not.toBeVisible();
+    const banner = page.getByTestId('reconnecting-banner');
+    await expect(banner).toBeHidden();
 
-    // Trigger offline / event error in page
-    await page.evaluate(() => {
-      window.dispatchEvent(new CustomEvent('test-live-status', { detail: 'reconnecting' }));
-    });
+    // The old test-only status hook must be gone: dispatching it changes nothing.
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test-live-status', { detail: 'reconnecting' })));
+    await expect(banner).toBeHidden();
 
+    // The stream drops (EventSource error) ...
+    await api.closeEvents();
     await expect(banner).toBeVisible();
-    await expect(banner).toContainText('Reconnecting');
+    await expect(banner).toHaveText('Reconnecting…');
 
-    // Reconnect
-    await page.evaluate(() => {
-      window.dispatchEvent(new CustomEvent('test-live-status', { detail: 'open' }));
-    });
+    // ... and the provider reconnects after its 1 s backoff; the mock stream opens again.
+    await expect(banner).toBeHidden({ timeout: 5000 });
+    expect(await page.evaluate(() => (window as unknown as { __eventSourceCount: number }).__eventSourceCount)).toBe(2);
+  });
 
-    await expect(banner).not.toBeVisible();
+  test('first connection shows Connecting…, not Reconnecting…', async ({ page }) => {
+    await mockApi(page, { eventsFail: true });
+    await page.goto('/#display');
+
+    const banner = page.getByTestId('reconnecting-banner');
+    await expect(banner).toHaveText('Connecting…');
+    // Still connecting after a failed retry.
+    await page.waitForTimeout(1500);
+    await expect(banner).toHaveText('Connecting…');
+  });
+
+  test('login page opens no event stream and shows no banner', async ({ page }) => {
+    await mockApi(page, { loopback: false, networkAccess: true, authenticated: false });
+    await page.goto('/#login?return=%23sensors');
+
+    await expect(page.getByLabel('Password')).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId('reconnecting-banner')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __eventSourceCount?: number }).__eventSourceCount ?? 0)).toBe(0);
+  });
+
+  test('a failing event stream for a logged-out remote caller leads to the login page', async ({ page }) => {
+    // The Settings stub makes no API call, so only the event stream can notice the missing login.
+    await mockApi(page, { loopback: false, networkAccess: true, authenticated: false, eventsFail: true });
+    await page.goto('/#settings');
+
+    await expect(page).toHaveURL(/#login\?return=%23settings$/);
   });
 });

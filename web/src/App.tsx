@@ -28,25 +28,24 @@ export function useHashRoute(): [string, (hash: string) => void] {
   return [route, navigate];
 }
 
-const Shell: React.FC = () => {
-  const [route, navigate] = useHashRoute();
+const navLinks = [
+  { hash: '#display', label: 'Display' },
+  { hash: '#layouts', label: 'Layouts' },
+  { hash: '#sensors', label: 'Sensors' },
+  { hash: '#devices', label: 'Devices' },
+  { hash: '#settings', label: 'Settings' },
+];
+
+interface ShellProps {
+  baseRoute: string;
+  navigate: (hash: string) => void;
+}
+
+const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
   const liveStatus = useLiveStatus();
 
-  // Strip query params for tab matching
-  const [baseRoute] = route.split('?');
-
-  const navLinks = [
-    { hash: '#display', label: 'Display' },
-    { hash: '#layouts', label: 'Layouts' },
-    { hash: '#sensors', label: 'Sensors' },
-    { hash: '#devices', label: 'Devices' },
-    { hash: '#settings', label: 'Settings' },
-  ];
-
   let currentTab: React.ReactNode;
-  if (baseRoute === '#login') {
-    currentTab = <LoginPage navigate={navigate} />;
-  } else if (baseRoute.startsWith('#layouts')) {
+  if (baseRoute.startsWith('#layouts')) {
     currentTab = <LayoutsTab navigate={navigate} />;
   } else if (baseRoute === '#sensors') {
     currentTab = <SensorsTab navigate={navigate} />;
@@ -118,7 +117,7 @@ const Shell: React.FC = () => {
       {liveStatus !== 'open' && (
         <div style={{ maxWidth: '1200px', margin: 'var(--space-3) auto 0', padding: '0 var(--space-4)', width: '100%' }}>
           <Banner data-testid="reconnecting-banner" variant="warning">
-            Reconnecting to Glance service…
+            {liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
           </Banner>
         </div>
       )}
@@ -139,9 +138,17 @@ const Shell: React.FC = () => {
 };
 
 export const App: React.FC = () => {
+  const [route, navigate] = useHashRoute();
+  const [baseRoute] = route.split('?');
+
+  // The login page needs no live connection: the event stream would only fail until the user has logged in.
+  if (baseRoute === '#login') {
+    return <LoginPage navigate={navigate} />;
+  }
+
   return (
     <LiveProvider>
-      <Shell />
+      <Shell baseRoute={baseRoute} navigate={navigate} />
     </LiveProvider>
   );
 };

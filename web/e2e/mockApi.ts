@@ -8,6 +8,8 @@ export interface MockApiOptions {
   password?: string;
   devices?: DeviceView[];
   layouts?: Array<{ name: string; width: number; height: number }>;
+  /** The mock event stream fails (error instead of open) on every connection attempt. */
+  eventsFail?: boolean;
 }
 
 export interface MockApiHandle {
@@ -107,34 +109,42 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     diagnostics: [],
   };
 
-  // Add mock EventSource in browser so SSE stays open without disconnecting
-  await page.addInitScript(() => {
-    class MockEventSource extends EventTarget {
-      url: string;
-      readyState: number = 0; // CONNECTING
-      onopen: ((ev: Event) => unknown) | null = null;
-      onerror: ((ev: Event) => unknown) | null = null;
-      onmessage: ((ev: MessageEvent) => unknown) | null = null;
+  // A mock EventSource behaving like the real one: fires open (or error, with eventsFail) shortly after construction.
+  // window.__eventSourceCount counts connection attempts; the latest instance is window.__mockEventSource.
+  await page.addInitScript(
+    ({ fail }) => {
+      class MockEventSource extends EventTarget {
+        url: string;
+        readyState = 0; // CONNECTING
+        onopen: ((ev: Event) => unknown) | null = null;
+        onerror: ((ev: Event) => unknown) | null = null;
+        onmessage: ((ev: MessageEvent) => unknown) | null = null;
 
-      constructor(url: string) {
-        super();
-        this.url = url;
-        (window as unknown as { __mockEventSource: MockEventSource }).__mockEventSource = this;
-        setTimeout(() => {
-          this.readyState = 1; // OPEN
-          const openEvent = new Event('open');
-          this.onopen?.(openEvent);
-          this.dispatchEvent(openEvent);
-        }, 10);
+        constructor(url: string) {
+          super();
+          this.url = url;
+          const w = window as unknown as { __mockEventSource: MockEventSource; __eventSourceCount?: number };
+          w.__mockEventSource = this;
+          w.__eventSourceCount = (w.__eventSourceCount ?? 0) + 1;
+          setTimeout(() => {
+            if (this.readyState === 2) return;
+            const ev = new Event(fail ? 'error' : 'open');
+            this.readyState = fail ? 2 : 1;
+            if (fail) this.onerror?.(ev);
+            else this.onopen?.(ev);
+            this.dispatchEvent(ev);
+          }, 10);
+        }
+
+        close() {
+          this.readyState = 2; // CLOSED
+        }
       }
 
-      close() {
-        this.readyState = 2; // CLOSED
-      }
-    }
-
-    (window as unknown as { EventSource: typeof MockEventSource }).EventSource = MockEventSource;
-  });
+      (window as unknown as { EventSource: typeof MockEventSource }).EventSource = MockEventSource;
+    },
+    { fail: !!opts.eventsFail },
+  );
 
   await page.route('**/api/**', async (route) => {
     const req = route.request();

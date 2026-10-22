@@ -1,102 +1,110 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { DeviceView } from '../api/types';
+import { api, notifyUnauthorized } from '../api/client';
+import type { AuthState, DeviceView } from '../api/types';
 
+/** 'connecting' until the stream has opened once; 'reconnecting' after it dropped. */
 export type LiveStatus = 'connecting' | 'open' | 'reconnecting';
 
-interface LiveContextType {
+export interface LiveContextValue {
   status: LiveStatus;
+  /** Live values are stale while not open, and after (re)opening until the next `sensors` event (docs/api.md). */
+  stale: boolean;
   sensorValues: Record<string, number | null>;
   devices: DeviceView[] | null;
 }
 
-const LiveContext = createContext<LiveContextType>({
+export const LiveContext = createContext<LiveContextValue>({
   status: 'connecting',
+  stale: true,
   sensorValues: {},
   devices: null,
 });
 
 export const useLiveStatus = () => useContext(LiveContext).status;
+export const useLiveStale = () => useContext(LiveContext).stale;
 export const useSensorValues = () => useContext(LiveContext).sensorValues;
 export const useDevices = () => useContext(LiveContext).devices;
 
+const BACKOFF_MS = [1000, 2000, 5000];
+
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<LiveStatus>('connecting');
+  const [fresh, setFresh] = useState(false);
   const [sensorValues, setSensorValues] = useState<Record<string, number | null>>({});
   const [devices, setDevices] = useState<DeviceView[] | null>(null);
 
   useEffect(() => {
-    // Listen for test simulated status in browser tests
-    const testHandler = (e: Event) => {
-      const custom = e as CustomEvent<LiveStatus>;
-      if (custom.detail) {
-        setStatus(custom.detail);
-      }
-    };
-    window.addEventListener('test-live-status', testHandler);
-
     let es: EventSource | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
-    const backoffs = [1000, 2000, 5000];
+    let opened = false;
+    let disposed = false;
 
     const connect = () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-        reconnectTimeout = null;
-      }
+      retryTimer = null;
+      const source = new EventSource('/api/events');
+      es = source;
 
-      setStatus((prev) => (prev === 'connecting' ? 'connecting' : 'reconnecting'));
-      es = new EventSource('/api/events');
-
-      es.onopen = () => {
+      source.onopen = () => {
+        opened = true;
         attempt = 0;
         setStatus('open');
+        setFresh(false);
       };
 
-      es.addEventListener('sensors', (e) => {
-        setStatus('open');
+      source.addEventListener('sensors', (e) => {
         try {
-          const data = JSON.parse(e.data);
-          setSensorValues((prev) => ({ ...prev, ...data }));
+          setSensorValues(JSON.parse((e as MessageEvent).data));
+          setFresh(true);
         } catch {
-          // ignore
+          // malformed payload: keep the previous values
         }
       });
 
-      es.addEventListener('devices', (e) => {
-        setStatus('open');
+      source.addEventListener('devices', (e) => {
         try {
-          const data = JSON.parse(e.data);
-          setDevices(data);
+          setDevices(JSON.parse((e as MessageEvent).data));
         } catch {
-          // ignore
+          // malformed payload: keep the previous list
         }
       });
 
-      es.onerror = () => {
-        setStatus('reconnecting');
-        if (es) {
-          es.close();
-          es = null;
-        }
-        const delay = backoffs[Math.min(attempt, backoffs.length - 1)];
+      source.onerror = () => {
+        source.close();
+        if (es !== source || disposed) return;
+        es = null;
+        setStatus(opened ? 'reconnecting' : 'connecting');
+        setFresh(false);
+        const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
         attempt++;
-        reconnectTimeout = setTimeout(connect, delay);
+        retryTimer = setTimeout(connect, delay);
+        // A remote caller whose login expired gets errors forever: send it to the login page instead.
+        api<AuthState>('GET', '/api/auth/state')
+          .then((state) => {
+            if (disposed || state.loopback || state.authenticated) return;
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = null;
+            disposed = true;
+            notifyUnauthorized();
+          })
+          .catch(() => {
+            // service unreachable: keep retrying
+          });
       };
     };
 
     connect();
 
     return () => {
-      window.removeEventListener('test-live-status', testHandler);
-      if (es) es.close();
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      disposed = true;
+      es?.close();
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, []);
 
+  const stale = status !== 'open' || !fresh;
+
   return (
-    <LiveContext.Provider value={{ status, sensorValues, devices }}>
-      {children}
-    </LiveContext.Provider>
+    <LiveContext.Provider value={{ status, stale, sensorValues, devices }}>{children}</LiveContext.Provider>
   );
 };
