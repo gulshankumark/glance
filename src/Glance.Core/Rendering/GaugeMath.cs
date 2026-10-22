@@ -7,6 +7,9 @@ namespace Glance.Core.Rendering;
 
 public static class GaugeMath
 {
+    /// <summary>The declared box every gauge draws in and is measured as; captions may extend outside it.</summary>
+    public static SKRect Box(GaugeItem g) => new(g.X, g.Y, g.X + g.Width, g.Y + g.Height);
+
     public static (double Min, double Max) Range(GaugeItem g, SensorKind? kind, IReadOnlyList<double?> history, double? value)
     {
         double min, max;

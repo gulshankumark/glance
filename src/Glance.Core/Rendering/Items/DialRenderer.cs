@@ -8,9 +8,9 @@ public static class DialRenderer
     public static void Draw(SKCanvas canvas, DialItem d, RenderContext ctx)
     {
         var st = GaugeState.Resolve(d, ctx);
-        var cx = d.X + d.Width / 2;
-        var cy = d.Y + d.Height / 2;
-        var radius = Math.Min(d.Width, d.Height) / 2;
+        var box = GaugeMath.Box(d);
+        var (cx, cy) = (box.MidX, box.MidY);
+        var radius = Math.Min(box.Width, box.Height) / 2;
         var (start, sweep) = ArcGaugeRenderer.SafeAngles(d.StartAngle, d.SweepAngle);
         var ticks = Math.Clamp(d.Ticks, LayoutLimits.MinTicks, LayoutLimits.MaxTicks);
         if (radius > 8)

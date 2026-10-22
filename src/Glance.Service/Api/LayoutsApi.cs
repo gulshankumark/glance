@@ -74,10 +74,8 @@ public static class LayoutsApi
             OverlayRenderer renderer, FontProvider fonts, TimeProvider time, UiInterest ui, CancellationToken ct) =>
         {
             ui.Touch();
-            var (layout, error) = await ReadLayoutAsync(request, ct);
-            if (layout is null) return Results.BadRequest(new { errors = new[] { error } });
-            var errors = LayoutValidator.Validate(layout);
-            if (errors.Count > 0) return Results.BadRequest(new { errors });
+            var (layout, invalid) = await ReadValidLayoutAsync(request, ct);
+            if (layout is null) return invalid!;
 
             using var frame = new SKBitmap(layout.Width, layout.Height);
             using (var canvas = new SKCanvas(frame))
@@ -91,6 +89,15 @@ public static class LayoutsApi
     }
 
     private static IResult InvalidName() => Results.BadRequest(new { errors = new[] { "invalid layout name" } });
+
+    /// <summary>A layout body that parses and validates, or the 400 <c>{errors}</c> response saying why not.</summary>
+    internal static async Task<(Layout? Layout, IResult? Invalid)> ReadValidLayoutAsync(HttpRequest request, CancellationToken ct)
+    {
+        var (layout, error) = await ReadLayoutAsync(request, ct);
+        if (layout is null) return (null, Results.BadRequest(new { errors = new[] { error } }));
+        var errors = LayoutValidator.Validate(layout);
+        return errors.Count > 0 ? (null, Results.BadRequest(new { errors })) : (layout, null);
+    }
 
     private static async Task<(Layout?, string)> ReadLayoutAsync(HttpRequest request, CancellationToken ct)
     {

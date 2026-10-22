@@ -46,6 +46,34 @@ public class OverlayRenderer
         }
     }
 
+    /// <summary>
+    /// Layout-space bounds per item id, from the same code paths that draw them: text items the ink bounds of the exact
+    /// string drawn, gauges and images their declared box. An item that throws is logged and left out.
+    /// </summary>
+    public IReadOnlyDictionary<string, SKRect> MeasureItems(Layout layout, RenderContext ctx)
+    {
+        var bounds = new Dictionary<string, SKRect>();
+        foreach (var item in layout.Items)
+        {
+            try
+            {
+                if (MeasureItem(item, ctx) is { } rect) bounds[item.Id] = rect;
+            }
+            catch (Exception ex) { _log.LogWarning(ex, "Item '{Id}' ({Type}) failed to measure and was skipped", item.Id, item.GetType().Name); }
+        }
+        return bounds;
+    }
+
+    private static SKRect? MeasureItem(LayoutItem item, RenderContext ctx) => item switch
+    {
+        TextItem t => TextItems.Measure(t, ctx),
+        SensorItem s => TextItems.Measure(s, ctx),
+        ClockItem c => TextItems.Measure(c, ctx),
+        ImageItem i => ImageItemRenderer.Measure(i, ctx),
+        GaugeItem g => GaugeMath.Box(g),
+        _ => null,
+    };
+
     /// <summary>Resolved ids of every sensor the layout reads (roles and pins applied; unresolved refs omitted).</summary>
     public IEnumerable<string> ReferencedSensorIds(Layout l, SensorHub hub) => HistoryNeeds(l, hub).Keys;
 

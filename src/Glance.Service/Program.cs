@@ -91,6 +91,7 @@ app.MapDevicesApi();
 app.MapSettingsApi();
 app.MapAssetsApi();
 app.MapPreviewApi();
+app.MapUiSupportApi();
 app.MapEventsApi();
 app.MapLogsApi();
 app.Run();

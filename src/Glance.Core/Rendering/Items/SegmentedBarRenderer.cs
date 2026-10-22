@@ -28,6 +28,6 @@ public static class SegmentedBarRenderer
             else paint.Color = st.Track;
             canvas.DrawRect(rect, paint);
         }
-        BarRenderer.DrawCaption(canvas, b, st, ctx, new SKRect(b.X, b.Y, b.X + b.Width, b.Y + b.Height));
+        BarRenderer.DrawCaption(canvas, b, st, ctx, GaugeMath.Box(b));
     }
 }
