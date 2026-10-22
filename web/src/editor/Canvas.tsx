@@ -218,7 +218,6 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
           border: '1px solid var(--surface-border)',
           borderRadius: 4,
           overflow: 'hidden',
-          touchAction: 'none',
           userSelect: 'none',
           outlineOffset: 2,
         }}
@@ -254,6 +253,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
                 width: pct(b.width, layout.width),
                 height: pct(b.height, layout.height),
                 cursor: 'move',
+                touchAction: 'none', // dragging an item must not scroll; the rest of the canvas still scrolls the page
                 border: selected ? '2px solid var(--accent)' : '1px dashed rgba(255, 255, 255, 0.3)',
                 borderRadius: 2,
                 zIndex: selected ? 1 : undefined,
