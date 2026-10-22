@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { upload } from '../api/client';
 import type { Asset } from '../api/types';
 import { Button } from '../ui/Button';
@@ -33,6 +33,15 @@ export const AssetImport: React.FC<AssetImportProps> = ({ kinds, onImported, rel
   const [error, setError] = useState<string | null>(null);
   const [zt, setZt] = useState<{ file: File; rotation: number } | null>(null);
   const accept = kinds.flatMap((k) => EXTENSIONS[k]);
+  // Leaving (another layout opened, tab switched) cancels a running upload; a late answer is never applied.
+  const uploads = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      uploads.current?.abort();
+      uploads.current = null;
+    },
+    [],
+  );
 
   const send = async (file: File, kind: Asset['kind'], rotation?: number) => {
     const form = new FormData();
@@ -41,16 +50,23 @@ export const AssetImport: React.FC<AssetImportProps> = ({ kinds, onImported, rel
     if (rotation !== undefined) form.append('ztRotation', String(rotation));
     setError(null);
     setProgress({ name: file.name, fraction: 0 });
+    const ctrl = new AbortController();
+    uploads.current = ctrl;
     try {
       const asset = await upload<Asset>('/api/assets', form, {
-        onProgress: (fraction) => setProgress({ name: file.name, fraction }),
+        onProgress: (fraction) => !ctrl.signal.aborted && setProgress({ name: file.name, fraction }),
+        signal: ctrl.signal,
       });
+      if (ctrl.signal.aborted) return;
       await reloadAssets();
-      await onImported(asset);
+      if (!ctrl.signal.aborted) await onImported(asset);
     } catch (e) {
-      setError(importErrorText(e));
+      if (!ctrl.signal.aborted) setError(importErrorText(e));
     } finally {
-      setProgress(null);
+      if (uploads.current === ctrl) {
+        uploads.current = null;
+        setProgress(null);
+      }
     }
   };
 

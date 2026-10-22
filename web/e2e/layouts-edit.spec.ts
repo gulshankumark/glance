@@ -366,6 +366,25 @@ test.describe('Layouts editing: background and import', () => {
     await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'image', assetId: 'up2' });
   });
 
+  test('an upload that finishes after a layout switch leaves the new layout alone', async ({ page }) => {
+    const api = await mockApi(page, { assetUploadDelayMs: 1500 });
+    await openLayout(page, 'Gaming');
+
+    await bg(page).getByRole('radio', { name: 'Animation' }).check();
+    await bg(page).getByLabel('File to import').setInputFiles({ name: 't.zt', mimeType: 'application/octet-stream', buffer: Buffer.from('zt') });
+    await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+    await expect(bg(page).getByRole('status')).toContainText('Uploading t.zt');
+
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await expect(page.getByTestId('layout-title')).toContainText('Default');
+    await page.waitForTimeout(2200);
+
+    await expect(unsaved(page)).toBeHidden();
+    expect(lastRender(api)?.name).toBe('Default');
+    expect(lastRender(api)?.background).toEqual({ type: 'color', color: '#101820' });
+    expect(api.layouts.get('Gaming')?.background).toEqual({ type: 'color', color: '#000000' });
+  });
+
   test('zt import asks rotation and uploads multipart', async ({ page }) => {
     const api = await mockApi(page);
     await openLayout(page, 'Gaming');

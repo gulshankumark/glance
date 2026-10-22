@@ -100,6 +100,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const [pending, setPending] = useState<{ run: () => void; errors: string[] } | null>(null);
   /** Changes whenever another layout is opened, so the canvas starts without the previous layout's preview. */
   const [openCount, setOpenCount] = useState(0);
+  const openCountRef = useRef(openCount);
+  openCountRef.current = openCount;
   const editorData = useEditorData();
   const { catalog, assets } = editorData;
   const loaded = useRef<Promise<{ layouts: LayoutSummary[]; devices: DeviceView[] }> | null>(null);
@@ -523,7 +525,11 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   key={openCount}
                   background={doc.draft.background}
                   data={editorData}
-                  onChange={(background) => setDoc((d) => d && { ...d, draft: { ...d.draft, background } })}
+                  onChange={(background) => {
+                    // Only for the layout the picker was opened with (a late import must not touch another one).
+                    const forOpen = openCount;
+                    if (forOpen === openCountRef.current) setDoc((d) => d && { ...d, draft: { ...d.draft, background } });
+                  }}
                 />
               </section>
               <section className={editorStyles.panel} aria-label="Properties">
