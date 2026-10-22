@@ -35,7 +35,8 @@ UI is clean and easy, and the CPU cost is near zero.
 - Installer that sets up the service and fetches PawnIO (see §9).
 - Idle cost, measured as the whole service process with the web UI closed (includes
   the 1 Hz sensor poll): ≤2% of one core for a still layout with live sensor values;
-  ≤5% for an animated layout with overlay at 24 fps. No target while the web UI is open.
+  ≤5% for an animated layout with overlay when the frame-rate cap is used (≈10% at full
+  24 fps on the owner's Ryzen 9 9950X with the WIC codec); the cap is a user setting. No target while the web UI is open.
 
 ### Next (v1.x)
 - Linux: same service as a systemd unit, sensors via hwmon, udev rule for device access.
@@ -274,7 +275,9 @@ Storage: Windows `%ProgramData%\Glance\` (`settings.json`, `layouts/`, `assets/`
   encode → send, at the animation's own timing. Decoded frames may be cached in memory
   if the animation is small enough; otherwise decode per frame. Target ≤5% of one core
   at 24 fps 1280×480 — **must be measured** in the first build; if it misses, cache
-  decoded frames or lower the animation frame rate.
+  decoded frames or lower the animation frame rate. An optional global cap
+  (AppSettings.maxOverlayAnimationFps) skips frames by elapsed time to bound CPU;
+  animation speed is preserved.
 - The live preview served to the web UI is the latest composed frame in layout
   orientation (what a person sees on the physical screen), not a separate render.
 
@@ -301,6 +304,7 @@ Tabs:
    unsupported devices listed with contribution link. Multiple screens are supported,
    each with its own layout.
 5. **Settings** — port, network access + password, HTTPS toggle, units, clock format,
+   frame-rate cap for animations with text/gauges on top (off, or 1–60 fps; e.g. 12 or 8),
    about/version, logs download.
 
 API: JSON REST for layouts/settings/devices/sensors, `GET /api/preview/{device}.jpg`,
@@ -405,6 +409,8 @@ v1, signing later.
 - Data in `%ProgramData%\Glance`.
 - Installer detects TRCC and offers to close it / remove its autostart.
 - History buffer: in-memory, 1 Hz, max 30 min window, not persisted across restarts.
+- JPEG codec is pluggable: WIC on Windows (Skia fallback), libjpeg-turbo planned for Linux.
+- Frame-rate cap for overlay animations is a user setting (owner decision).
 
 ## 15. Left to the builder
 Web UI framework and styling approach; installer technology (WiX, Inno Setup, …);
