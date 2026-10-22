@@ -1,10 +1,13 @@
 import type { Page } from '@playwright/test';
+import type { DeviceView } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
   networkAccess?: boolean;
   loopback?: boolean;
   password?: string;
+  devices?: DeviceView[];
+  layouts?: Array<{ name: string; width: number; height: number }>;
 }
 
 export interface MockApiHandle {
@@ -12,7 +15,22 @@ export interface MockApiHandle {
   sendEvent: (event: string, data: unknown) => Promise<void>;
   closeEvents: () => Promise<void>;
   options: MockApiOptions;
+  devices: DeviceView[];
 }
+
+// 1x1 black JPEG
+const dummyJpeg = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
+  0x00, 0x48, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08,
+  0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12,
+  0x13, 0x0f, 0x14, 0x1d, 0x1a, 0x1f, 0x1e, 0x1d, 0x1a, 0x1c, 0x1c, 0x20, 0x24, 0x2e, 0x27, 0x20,
+  0x22, 0x2c, 0x23, 0x1c, 0x1c, 0x28, 0x37, 0x29, 0x2c, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1f, 0x27,
+  0x39, 0x3d, 0x38, 0x32, 0x3c, 0x2e, 0x33, 0x34, 0x32, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01,
+  0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xff, 0xc4, 0x00, 0x1f, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01,
+  0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+  0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f,
+  0x00, 0xbf, 0x80, 0xff, 0xd9
+]);
 
 export async function mockApi(page: Page, options: MockApiOptions = {}): Promise<MockApiHandle> {
   const opts: MockApiOptions = {
@@ -25,7 +43,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
 
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
 
-  const defaultDevices = [
+  const devices: DeviceView[] = options.devices !== undefined ? [...options.devices] : [
     {
       key: 'thermalright-hid-5302_SER1',
       driver: 'thermalright-hid-5302',
@@ -42,6 +60,11 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       fps: 10.0,
       framesSent: 1234,
     },
+  ];
+
+  const layouts = options.layouts !== undefined ? [...options.layouts] : [
+    { name: 'Default', width: 1280, height: 480 },
+    { name: 'Gaming', width: 1280, height: 480 },
   ];
 
   const defaultSensors = {
@@ -157,6 +180,18 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path.startsWith('/api/preview/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/jpeg',
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+        body: dummyJpeg,
+      });
+      return;
+    }
+
     if (path === '/api/auth/state') {
       await route.fulfill({
         status: 200,
@@ -193,7 +228,35 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(defaultDevices),
+        body: JSON.stringify(devices),
+      });
+      return;
+    }
+
+    if (path.startsWith('/api/devices/') && method === 'PUT') {
+      const key = decodeURIComponent(path.replace('/api/devices/', ''));
+      const dev = devices.find((d) => d.key === key);
+      if (!dev) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown device' }) });
+        return;
+      }
+      const patch = body as { rotation?: 0 | 90 | 180 | 270; activeLayout?: string | null };
+      if (patch.rotation !== undefined) dev.rotation = patch.rotation;
+      if (patch.activeLayout !== undefined) dev.activeLayout = patch.activeLayout;
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(dev),
+      });
+      return;
+    }
+
+    if (path === '/api/layouts') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(layouts),
       });
       return;
     }
@@ -226,6 +289,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
   return {
     calls,
     options: opts,
+    devices,
     sendEvent: async (event: string, data: unknown) => {
       await page.evaluate(
         ({ ev, d }) => {
