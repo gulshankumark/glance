@@ -1,7 +1,7 @@
 # Glance HTTP API
 
 The contract between the Glance service and its web UI (`src/Glance.Service/wwwroot`). Every route lives under
-`/api` on the same origin as the UI; the UI calls it only through `js/api.js`.
+`/api` on the same origin as the UI; the UI calls it only through `web/src/api/client.ts`.
 
 ## Conventions
 
