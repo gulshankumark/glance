@@ -25,6 +25,10 @@ export interface MockApiOptions {
   assets?: Asset[];
   /** While set, POST /api/assets answers this status with {error}; may be changed while a test runs. */
   assetUploadStatus?: 400 | 413;
+  /** While set, POST /api/assets fails at the network level (the connection is dropped). */
+  assetUploadFail?: boolean;
+  /** Delay of each POST /api/assets answer in ms (default 0). */
+  assetUploadDelayMs?: number;
 }
 
 /** A POST /api/assets request as the mock received it. */
@@ -480,6 +484,11 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
         ztRotation: part('ztRotation'),
       };
       uploads.push(upload);
+      if (opts.assetUploadFail) {
+        await route.abort('failed');
+        return;
+      }
+      if (opts.assetUploadDelayMs) await new Promise((r) => setTimeout(r, opts.assetUploadDelayMs));
       const status = opts.assetUploadStatus;
       if (status) {
         const error = status === 413 ? 'file is too large' : 'invalid media';
@@ -489,7 +498,11 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       const kind = (upload.kind ?? 'image') as Asset['kind'];
       const asset: Asset = { id: `up${uploads.length}`, kind, width: 320, height: 240, frameCount: kind === 'image' ? 1 : 30 };
       assets.push(asset);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(asset) });
+      try {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(asset) });
+      } catch {
+        // the page aborted the upload
+      }
       return;
     }
 

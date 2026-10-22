@@ -352,6 +352,20 @@ test.describe('Layouts editing: background and import', () => {
     await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'color', color: '#203040' });
   });
 
+  test('a failed upload shows a message and Import works again', async ({ page }) => {
+    const api = await mockApi(page, { assetUploadFail: true });
+    await openLayout(page, 'Gaming');
+
+    await bg(page).getByRole('radio', { name: 'Image' }).check();
+    await bg(page).getByLabel('File to import').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+    await expect(bg(page).getByRole('alert')).toHaveText('The file could not be uploaded.');
+    await expect(bg(page).getByRole('button', { name: 'Import…' })).toBeEnabled();
+
+    api.options.assetUploadFail = undefined;
+    await bg(page).getByLabel('File to import').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'image', assetId: 'up2' });
+  });
+
   test('zt import asks rotation and uploads multipart', async ({ page }) => {
     const api = await mockApi(page);
     await openLayout(page, 'Gaming');

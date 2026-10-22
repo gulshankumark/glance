@@ -42,7 +42,9 @@ export const AssetImport: React.FC<AssetImportProps> = ({ kinds, onImported, rel
     setError(null);
     setProgress({ name: file.name, fraction: 0 });
     try {
-      const asset = await upload<Asset>('/api/assets', form, (fraction) => setProgress({ name: file.name, fraction }));
+      const asset = await upload<Asset>('/api/assets', form, {
+        onProgress: (fraction) => setProgress({ name: file.name, fraction }),
+      });
       await reloadAssets();
       await onImported(asset);
     } catch (e) {

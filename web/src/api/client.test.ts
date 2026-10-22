@@ -214,7 +214,7 @@ describe('upload with progress', () => {
   });
 
   /** A fake XMLHttpRequest answering `status` with a JSON `body` after reporting half the upload. */
-  function fakeXhr(status: number, body: unknown) {
+  function fakeXhr(status: number, body: unknown, outcome: 'load' | 'error' | 'timeout' | 'hang' = 'load') {
     const sent: Array<{ method: string; url: string; body: unknown }> = [];
     class FakeXhr {
       status = 0;
@@ -224,6 +224,13 @@ describe('upload with progress', () => {
       };
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      aborted = false;
+      abort() {
+        this.aborted = true;
+        setTimeout(() => this.onabort?.(), 0);
+      }
       private method = '';
       private url = '';
       open(method: string, url: string) {
@@ -236,9 +243,11 @@ describe('upload with progress', () => {
       send(data: unknown) {
         sent.push({ method: this.method, url: this.url, body: data });
         this.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 });
-        this.status = status;
-        this.responseText = JSON.stringify(body);
-        setTimeout(() => this.onload?.(), 0);
+        if (outcome === 'hang') return;
+        this.status = outcome === 'load' ? status : 0;
+        this.responseText = outcome === 'load' ? JSON.stringify(body) : '';
+        const done = outcome === 'load' ? this.onload : outcome === 'error' ? this.onerror : this.ontimeout;
+        setTimeout(() => done?.(), 0);
       }
     }
     globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
@@ -249,14 +258,14 @@ describe('upload with progress', () => {
     const sent = fakeXhr(200, { id: 'a1', kind: 'zt', width: 1, height: 1, frameCount: 3 });
     const form = new FormData();
     const progress = vi.fn();
-    await expect(upload('/api/assets', form, progress)).resolves.toMatchObject({ id: 'a1' });
+    await expect(upload('/api/assets', form, { onProgress: progress })).resolves.toMatchObject({ id: 'a1' });
     expect(sent).toEqual([{ method: 'POST', url: '/api/assets', body: form }]);
     expect(progress).toHaveBeenCalledWith(0.5);
   });
 
   it('rejects with the status and error of a failed upload', async () => {
     fakeXhr(413, { error: 'file is too large' });
-    const err = await upload('/api/assets', new FormData(), () => {}).catch((e: unknown) => e);
+    const err = await upload('/api/assets', new FormData()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(413);
     expect((err as ApiError).errors).toEqual(['file is too large']);
@@ -266,7 +275,35 @@ describe('upload with progress', () => {
     fakeXhr(401, { error: 'login required' });
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
-    await upload('/api/assets', new FormData(), () => {}).catch(() => undefined);
+    await upload('/api/assets', new FormData()).catch(() => undefined);
     expect(handler).toHaveBeenCalled();
+  });
+
+  it('rejects when the network fails', async () => {
+    fakeXhr(0, null, 'error');
+    await expect(upload('/api/assets', new FormData())).rejects.toThrow(TypeError);
+  });
+
+  it('rejects with a TimeoutError when the upload times out', async () => {
+    fakeXhr(0, null, 'timeout');
+    const err = await upload('/api/assets', new FormData()).catch((e: unknown) => e);
+    expect((err as DOMException).name).toBe('TimeoutError');
+  });
+
+  it('aborts the request when the signal fires, rejecting with an AbortError', async () => {
+    fakeXhr(0, null, 'hang');
+    const ctrl = new AbortController();
+    const pending = upload('/api/assets', new FormData(), { signal: ctrl.signal }).catch((e: unknown) => e);
+    ctrl.abort();
+    expect(((await pending) as DOMException).name).toBe('AbortError');
+  });
+
+  it('does not send when the signal has already fired', async () => {
+    const sent = fakeXhr(200, {});
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const err = await upload('/api/assets', new FormData(), { signal: ctrl.signal }).catch((e: unknown) => e);
+    expect((err as DOMException).name).toBe('AbortError');
+    expect(sent).toHaveLength(0);
   });
 });

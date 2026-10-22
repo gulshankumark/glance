@@ -20,6 +20,8 @@ export function kindFromFileName(name: string): Asset['kind'] | null {
 /** What to tell the user when POST /api/assets failed. */
 export function importErrorText(e: unknown): string {
   if (e instanceof ApiError) return e.status === 413 ? 'File is too large (max 64 MB).' : e.errors.join('; ');
+  if (e instanceof DOMException && e.name === 'TimeoutError') return 'The upload timed out.';
+  if (e instanceof DOMException && e.name === 'AbortError') return 'The upload was cancelled.';
   return 'The file could not be uploaded.';
 }
 

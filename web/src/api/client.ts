@@ -94,18 +94,33 @@ export async function api<T>(method: string, path: string, body?: unknown, optio
   return handleResponse<T>(res, options);
 }
 
+export interface UploadOptions {
+  /** Receives the fraction of the body sent (0..1). */
+  onProgress?: (fraction: number) => void;
+  /** Aborts the upload (the promise rejects with an AbortError). */
+  signal?: AbortSignal;
+}
+
 /**
  * POST a multipart/form-data body (the browser sets the boundary). Uses XMLHttpRequest because fetch cannot report
- * upload progress; `onProgress` receives the fraction sent (0..1). Answers and errors are handled as for api().
+ * upload progress. Answers and HTTP errors are handled as for api(); a network failure rejects with a TypeError, a
+ * timeout with a TimeoutError and an abort with an AbortError (DOMException).
  */
-export function upload<T>(path: string, form: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+export function upload<T>(path: string, form: FormData, { onProgress, signal }: UploadOptions = {}): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('The upload was cancelled.', 'AbortError'));
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    const onAbortSignal = () => xhr.abort();
+    const settle = () => signal?.removeEventListener('abort', onAbortSignal);
     xhr.open('POST', path);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
     };
     xhr.onload = () => {
+      settle();
       const empty = xhr.status === 204 || xhr.status === 205 || xhr.status === 304;
       const res = new Response(empty ? null : xhr.responseText, {
         status: xhr.status,
@@ -113,7 +128,19 @@ export function upload<T>(path: string, form: FormData, onProgress?: (fraction: 
       });
       handleResponse<T>(res).then(resolve, reject);
     };
-    xhr.onerror = () => reject(new TypeError('Network request failed'));
+    xhr.onerror = () => {
+      settle();
+      reject(new TypeError('Network request failed'));
+    };
+    xhr.ontimeout = () => {
+      settle();
+      reject(new DOMException('The upload timed out.', 'TimeoutError'));
+    };
+    xhr.onabort = () => {
+      settle();
+      reject(new DOMException('The upload was cancelled.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbortSignal);
     xhr.send(form);
   });
 }

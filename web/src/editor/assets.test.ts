@@ -17,6 +17,8 @@ describe('assets', () => {
     expect(importErrorText(new ApiError(413, ['file is too large']))).toBe('File is too large (max 64 MB).');
     expect(importErrorText(new ApiError(400, ['invalid media']))).toBe('invalid media');
     expect(importErrorText(new TypeError('x'))).toBe('The file could not be uploaded.');
+    expect(importErrorText(new DOMException('x', 'TimeoutError'))).toBe('The upload timed out.');
+    expect(importErrorText(new DOMException('x', 'AbortError'))).toBe('The upload was cancelled.');
   });
 
   it('labels assets by kind, number and size', () => {
