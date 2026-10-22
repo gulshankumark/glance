@@ -4,30 +4,32 @@
 
 **Goal:** The browser UI from spec §8 — tabs Display, Layouts (drag-sensors-from-list editor), Sensors, Devices, Settings, plus login — served by the existing service, with the few API additions it needs.
 
-**Architecture:** Static files in `src/Glance.Service/wwwroot`: plain HTML + CSS + native ES modules, no framework, no build step, no CDN. Pure logic (API client, editor model, schema, formatting) lives in small modules unit-tested with `node --test`; the pages are tested end-to-end with Playwright for .NET driving the installed Edge against a tiny static host with mocked `/api/*` routes. The editor's canvas shows the server-rendered draft (`POST /api/render`) with HTML selection boxes positioned from a new bounds endpoint, so preview and device can never drift.
+**Architecture:** A React + TypeScript single-page app in `web/`, built with Vite into `src/Glance.Service/wwwroot` (build output, git-ignored) so the service serves static files and needs no Node.js at runtime. `dotnet publish` of the service runs the web build. During development `npm run dev` serves the UI with a proxy to the service. Pure logic (API client, editor model, schema, scheduler, formatting) is unit-tested with Vitest; components with Testing Library; whole pages end-to-end with Playwright Test driving the installed Edge against `vite preview` with mocked `/api/*` routes. The editor canvas shows the server-rendered draft (`POST /api/render`) with selection boxes positioned from `POST /api/render/bounds`, so preview and device never drift.
 
-**Tech Stack:** HTML5, CSS custom properties, ES2022 modules, EventSource (SSE), HTML5 drag-and-drop + pointer events; .NET 8 for API additions (xUnit); Node 24 `node --test` (dev-only, no npm packages); Microsoft.Playwright (Apache-2.0) with `Channel = "msedge"`.
+**Tech Stack:** React 18, TypeScript (strict), Vite, CSS Modules + CSS custom properties, EventSource (SSE), native HTML5 drag-and-drop + pointer events; Vitest + @testing-library/react + jsdom; @playwright/test (channel `msedge`); .NET 8 for API additions (xUnit). Owner decision 2026-10-22: React + Vite + TypeScript instead of plain HTML/JS.
 
-**Spec:** `docs/superpowers/specs/2026-10-21-glance-design.md` (§1, §6.1, §7.1, §8, §9.1). Core API contract from Plan 1 (routes in `src/Glance.Service/Api/*`, `Security/AuthApi.cs`).
+**Spec:** `docs/superpowers/specs/2026-10-21-glance-design.md` (§1, §6.1, §7.1, §8, §9.1). API contract: `docs/api.md` (Task 1).
 
 ## Global Constraints
 
 - Branch `feat/web-ui`. **Commit at the end of every task** (small, meaningful, conventional message ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). **No push, no PR** until the owner decides.
 - Nothing from vendor software in the repo (no vendor names in UI copy except "Thermalright" as supported-hardware fact; no vendor images).
-- **No Node.js at runtime, no build step, no framework, no CDN/remote assets** (spec §8; LAN/offline use). Every file the browser loads is in `wwwroot`.
-- **Never insert untrusted strings with `innerHTML`/`insertAdjacentHTML`.** Layout names, labels, aliases, sensor names, error messages go through `textContent`/`value`/attributes only. A unit test greps `wwwroot/js` for `innerHTML` and fails on any use.
-- All API calls same-origin via `js/api.js`; JSON bodies with `Content-Type: application/json`; uploads `multipart/form-data` (AccessGate rules from Plan 1).
-- Clean, calm UI (spec §1): one accent colour, generous spacing, system font stack, dark theme default with light theme via `prefers-color-scheme`; usable from 360 px wide (phones on LAN).
-- Live values via one shared EventSource (`/api/events`); preview images refreshed ≤ 1 per second and only while visible (`document.visibilityState`).
-- Test commands: `dotnet test Glance.sln --filter "Category!=Hardware"` and `node --test tests/ui-unit`. Playwright tests carry `[Trait("Category","UI")]` and run in the same `dotnet test` (they need Microsoft Edge installed; skip with a clear message if Edge is missing).
+- **No Node.js at runtime and no CDN/remote assets** (spec §8; LAN/offline use): everything the browser loads is bundled by Vite into `wwwroot`. Node.js (≥ 20) is a build-time requirement only.
+- Dependencies: runtime only `react` and `react-dom`; everything else is a devDependency. No UI component library, no router library, no state library, no CSS framework — hand-written, small. Every npm package (runtime and dev) must be MIT/Apache-2.0/ISC/BSD and recorded in THIRD-PARTY-NOTICES.md. `package-lock.json` committed.
+- **No `dangerouslySetInnerHTML`, `innerHTML`, `eval`, `new Function`** anywhere in `web/src` — a unit test scans the sources and fails on any use. All user/sensor strings render as React text.
+- TypeScript `strict: true`; `npm run build` must pass `tsc --noEmit` with zero errors; ESLint not required.
+- All API calls go through `web/src/api/client.ts`: same-origin, JSON bodies with `Content-Type: application/json`, uploads `multipart/form-data` (AccessGate rules from Plan 1). API types in `web/src/api/types.ts` mirror `docs/api.md`.
+- Clean, calm UI (spec §1): one accent colour, generous spacing, system font stack, dark theme default, light theme via `prefers-color-scheme`; usable from 360 px wide (phones on LAN).
+- One shared EventSource (`/api/events`) via a React context; preview images refreshed ≤ 1/s and only while `document.visibilityState === "visible"`.
+- Test commands: `dotnet test Glance.sln --filter "Category!=Hardware"`; in `web/`: `npm test` (Vitest, run mode), `npm run build`, `npm run e2e` (Playwright; skips with a clear message if Microsoft Edge is not installed).
 
 ## Review Focus
 
-1. **Remote session expires mid-edit (401)** → user is sent to the login page and, after logging in, lands back on the Layouts tab with the unsaved draft restored (draft kept in `sessionStorage`). Test in Task 2 (redirect) and Task 6 (draft restore).
-2. **Service restarts / network drops** → a visible "Reconnecting…" banner appears, values grey out instead of showing stale numbers, and everything resumes when SSE reconnects. Test in Task 2.
+1. **Remote session expires mid-edit (401)** → user is sent to login and, after logging in, lands back on the Layouts tab with the unsaved draft restored (draft kept in `sessionStorage`). Test in Task 2 (redirect) and Task 6 (draft restore).
+2. **Service restarts / network drops** → a visible "Reconnecting…" banner appears, live values grey out instead of showing stale numbers, and everything resumes when SSE reconnects. Test in Task 2.
 3. **Unsaved edits when switching layout, tab, or closing the page** → confirm prompt (`beforeunload` + in-app dialog). Test in Task 6.
-4. **Server rejects a layout (400 `{errors}`)** → errors shown next to Save, editor stays usable, nothing lost. Test in Task 6.
-5. **Rapid edits / dragging** → draft renders are debounced (150 ms) with at most one request in flight; stale responses are discarded. Test in Task 5 (pure scheduler) and Task 6.
+4. **Server rejects a layout (400 `{errors}`)** → errors shown next to Save, editor stays usable, nothing lost. Test in Task 5.
+5. **Rapid edits / dragging** → draft renders debounced (150 ms), at most one request in flight, stale responses discarded. Test in Task 4 (scheduler) and Task 5.
 
 ---
 
@@ -35,31 +37,23 @@
 
 ```
 src/Glance.Service/
-  Api/UiSupportApi.cs            fonts, timezones, render bounds   (Task 1)
-  Api/DevicesApi.cs (modify)     fps, clear active layout           (Task 1)
-  Api/EventsApi.cs  (modify)     devices event on settings change   (Task 1)
-  wwwroot/
-    index.html                   app shell (header, tab bar, <main>, dialogs)
-    login.html                   login page
-    css/app.css                  design tokens + components
-    js/api.js                    fetch wrapper, error model, 401 handling
-    js/events.js                 shared EventSource with reconnect + status
-    js/dom.js                    tiny safe DOM helpers (el(), clear())
-    js/app.js                    hash router, tab mounting, banner
-    js/format.js                 value/unit formatting for the UI
-    js/tabs/display.js | layouts.js | sensors.js | devices.js | settings.js
-    js/editor/model.js           pure layout operations + item defaults
-    js/editor/schema.js          per-item-type property descriptors
-    js/editor/scheduler.js       debounced single-flight render scheduler
-    js/editor/canvas.js          preview image, selection boxes, drag/move, drop
-    js/editor/properties.js      property panel generated from schema
-    js/editor/sensor-tree.js     live sensor tree (drag source)
-    js/editor/background.js      background picker + asset import
-    js/login.js
-src/Glance.Core/Rendering/OverlayRenderer.cs (modify)  MeasureItems
-docs/api.md                       API contract for UI and future clients (Task 1)
-tests/ui-unit/*.test.mjs          node --test unit tests
-tests/Glance.Ui.Tests/            Playwright (.NET) end-to-end tests + StaticHost + ApiMock
+  Api/UiSupportApi.cs, Api/DevicesApi.cs, Api/EventsApi.cs   (Task 1)
+  Glance.Service.csproj (modify)   web build on publish         (Task 2)
+  wwwroot/                         Vite build output (git-ignored; placeholder removed)
+docs/api.md                        API contract                  (Task 1)
+web/
+  package.json, package-lock.json, tsconfig.json, vite.config.ts, playwright.config.ts, index.html
+  src/main.tsx, src/App.tsx         shell, hash router, tab bar, connection banner
+  src/api/client.ts, types.ts       fetch wrapper, ApiError, 401 handling, API types
+  src/live/LiveProvider.tsx         shared EventSource context + hooks (useSensors, useDevices, useLiveStatus)
+  src/lib/format.ts                 value formatting
+  src/login/LoginPage.tsx
+  src/tabs/DisplayTab.tsx, SensorsTab.tsx, DevicesTab.tsx, SettingsTab.tsx, LayoutsTab.tsx
+  src/editor/model.ts, schema.ts, scheduler.ts      pure logic
+  src/editor/Canvas.tsx, SensorTree.tsx, Properties.tsx, BackgroundPicker.tsx, AddMenu.tsx
+  src/ui/*.tsx, *.module.css, tokens.css           small shared components (Button, Card, Field, Dialog, Banner, Select)
+  src/**/*.test.ts(x)               Vitest unit/component tests
+  e2e/*.spec.ts, e2e/mockApi.ts     Playwright tests + route mocks
 ```
 
 ---
@@ -90,120 +84,67 @@ tests/Glance.Ui.Tests/            Playwright (.NET) end-to-end tests + StaticHos
 
 ---
 
-### Task 2: App shell, API client, live events, login
+
+### Task 2: Web project, build integration, app shell, API client, live events, login
 
 **Files:**
-- Create: `wwwroot/index.html`, `wwwroot/login.html`, `wwwroot/css/app.css`, `wwwroot/js/{api,events,dom,app,login,format}.js`, `wwwroot/js/tabs/{display,layouts,sensors,devices,settings}.js` (stubs rendering their title), `tests/ui-unit/api.test.mjs`, `tests/ui-unit/no-innerhtml.test.mjs`, `tests/ui-unit/format.test.mjs`, `tests/Glance.Ui.Tests/` project (`StaticHost.cs`, `ApiMock.cs`, `ShellTests.cs`)
-- Replace: the placeholder `wwwroot/index.html`
+- Create: `web/` project (package.json scripts `dev`, `build` = `tsc --noEmit && vite build`, `preview`, `test` = `vitest run`, `e2e` = `playwright test`), `vite.config.ts` (outDir `../src/Glance.Service/wwwroot`, `emptyOutDir: true`; dev proxy `/api` → `http://localhost:8735` with the `Origin` header removed and `changeOrigin: true` so the service's Host/Origin gate accepts it; SSE must stream through the proxy), `index.html`, `src/main.tsx`, `src/App.tsx`, `src/api/{client,types}.ts`, `src/live/LiveProvider.tsx`, `src/lib/format.ts`, `src/login/LoginPage.tsx`, `src/ui/*` (Button, Card, Field, Dialog, Banner, Select, tokens.css), tab stubs, `e2e/mockApi.ts`, `e2e/shell.spec.ts`, `src/security.test.ts`
+- Modify: `src/Glance.Service/Glance.Service.csproj` (MSBuild target before publish: `npm ci` + `npm run build` in `web/`; clear error if `node`/`npm` missing; skip in plain `dotnet build`/`dotnet test`), `.gitignore` (`src/Glance.Service/wwwroot/`, `web/node_modules/`, `web/test-results/`, `web/playwright-report/`), `THIRD-PARTY-NOTICES.md`
+- Delete: `src/Glance.Service/wwwroot/index.html` (placeholder) — service tests that requested `/` must be updated to not depend on it (or a test fixture serves a stub).
 
 **Interfaces:**
-- `api.js`: `export class ApiError extends Error { status; errors /* string[] */ }`; `export async function api(method, path, body?) → parsed JSON | null` (throws `ApiError`; on 401 stores `location.hash` + calls `onUnauthorized()` which navigates to `/login.html?return=<hash>`); `export async function upload(path, formData)`; `export function setUnauthorizedHandler(fn)` (tests).
-- `events.js`: `export const live = { on(event, fn) → unsubscribe, status /* 'connecting'|'open'|'reconnecting' */, onStatus(fn) }` — one EventSource; on error shows status `reconnecting` and retries with backoff 1→2→5 s; JSON-parses `data`.
-- `dom.js`: `export function el(tag, props = {}, ...children)` (props: `class`, `text`, `attrs`, `on: {event: fn}`; strings children become text nodes), `export function clear(node)`.
-- `format.js`: `export function formatValue(value, unit, decimals) → string` (`null`/non-finite → "—"), `export function formatFps(fps)`.
-- `app.js`: hash routes `#display` (default), `#layouts`, `#layouts/<name>`, `#sensors`, `#devices`, `#settings`; each tab module exports `mount(container, ctx) → unmount()`; ctx = `{ api, live, navigate(hash), confirmLeave(fn) }`. Header shows a connection banner bound to `live.status`.
-- `ApiMock` (C#): routes `/api/**` on a Playwright page to in-memory handlers; seeded with one connected 1280×480 device, sensors (`cpu/t`, `/amdcpu/0/temperature/2`, a GPU group), two layouts, one asset; records requests for assertions. `StaticHost` serves `src/Glance.Service/wwwroot` from the source tree on an ephemeral loopback port.
+- `client.ts`: `class ApiError extends Error { status: number; errors: string[] }`; `api<T>(method, path, body?): Promise<T>` (throws `ApiError`; 401 → `onUnauthorized(location.hash)` → navigates to `#login?return=<encoded hash>`); `upload<T>(path, form: FormData): Promise<T>`; `setUnauthorizedHandler(fn)`.
+- Routing (hash, hand-written `useHashRoute()`): `#display` (default), `#layouts`, `#layouts/<name>`, `#sensors`, `#devices`, `#settings`, `#login?return=…`. Tab components: `({ navigate }: { navigate(hash: string): void }) => JSX`.
+- `LiveProvider`: one EventSource; `useLiveStatus(): 'connecting'|'open'|'reconnecting'`; `useSensorValues(): Record<string, number|null>`; `useDevices(): DeviceView[] | null`; reconnect backoff 1 → 2 → 5 s; header banner "Reconnecting…" when not open; live values rendered greyed (`aria-busy`) while reconnecting.
+- `format.ts`: `formatValue(value: number|null|undefined, unit?: string, decimals = 0): string` (null/non-finite → "—").
+- `e2e/mockApi.ts`: `mockApi(page, seed?)` installs `page.route('**/api/**')` handlers backed by an in-memory store (one connected 1280×480 device `thermalright-hid-5302_SER1`, sensors `cpu/t` and `/amdcpu/0/temperature/2` plus a GPU group, roles, two layouts, one asset), records requests (`calls`), and serves `/api/events` as an SSE response the test can push to / close. Later tasks extend it (Ruling: each task adds the routes its tests need).
 
-- [ ] **Step 1: Write failing tests** — node: `api_throws_ApiError_with_errors_array_on_400`, `api_calls_unauthorized_handler_on_401_with_current_hash`, `api_sends_json_content_type`, `formatValue_null_is_em_dash`, `formatValue_rounds_to_decimals`, `no_innerHTML_in_wwwroot_js` (fails on `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`). Playwright: `Tabs_switch_by_hash_and_highlight_active`, `Unauthorized_api_redirects_to_login_with_return`, `Login_posts_password_and_returns_to_hash`, `Reconnecting_banner_shows_when_events_drop_and_hides_on_reconnect` (mock closes the SSE stream).
-- [ ] **Step 2: Run** `node --test tests/ui-unit` and `dotnet test --filter Category=UI` — Expected: FAIL.
-- [ ] **Step 3: Implement** shell and modules per Interfaces. Design tokens in `app.css` (`--bg`, `--surface`, `--text`, `--muted`, `--accent`, `--danger`, spacing scale 4/8/12/16/24/32, radius 10px); components: `.btn`, `.btn-primary`, `.card`, `.field`, `.banner`, `.tabbar`, `.dialog` (native `<dialog>`).
-- [ ] **Step 4: Run** both test commands — Expected: PASS.
-- [ ] **Step 5: Commit** `feat(ui): add app shell, API client, live events and login`
-
----
+- [ ] **Step 1: Failing tests** — Vitest: `api throws ApiError with errors[] on 400`, `api invokes unauthorized handler with current hash on 401`, `api sends JSON content type`, `formatValue null → "—"`, `formatValue rounds`, `no dangerouslySetInnerHTML/innerHTML/eval/new Function in src` (scans files). Playwright: `tabs switch by hash and highlight active`, `401 redirects to login with return`, `login posts password and returns to hash`, `reconnecting banner shows when events drop and hides after reconnect`.
+- [ ] **Step 2: Run** `npm test` and `npm run e2e` — Expected: FAIL.
+- [ ] **Step 3: Implement** per Interfaces; design tokens in `tokens.css` (`--bg --surface --text --muted --accent --danger`, spacing 4/8/12/16/24/32, radius 10px).
+- [ ] **Step 4: Run** `npm test`, `npm run build`, `npm run e2e`, `dotnet test Glance.sln --filter "Category!=Hardware"`, and `dotnet publish src/Glance.Service -c Release -o <temp dir>` (assert `wwwroot/index.html` and hashed assets exist in the output) — Expected: all PASS.
+- [ ] **Step 5: Commit** (may be 2–3 commits: scaffold+build integration; shell+client+live; login) e.g. `build(web): add React + Vite + TypeScript project built into wwwroot`.
 
 ### Task 3: Display tab
+**Files:** `web/src/tabs/DisplayTab.tsx` (+ module CSS), `e2e/display.spec.ts`, component tests as useful.
+**Behaviour (spec §8.1):** card per device: live preview `<img>` (`/api/preview/{key}.jpg?t=<n>`, refreshed every 1 s while visible, keeps last image on 404), name, resolution, status, fps, active-layout select (PUT `activeLayout`), rotation buttons 0/90/180/270 with prominent "Flip 180°"; no devices → "No screen found — plug in a supported display"; no active layout → call to action "Choose a layout" / "Create a layout" (navigates `#layouts` and starts a new layout); retrying/unsupported shown with their message.
+- [ ] Failing Playwright tests: `shows device card with preview and fps`, `changing layout PUTs activeLayout`, `Flip 180° PUTs rotation`, `preview refresh pauses while hidden`, `empty state without devices`, `first-run call to action without active layout` → run FAIL → implement → PASS → **commit** `feat(ui): add Display tab with live preview and quick controls`.
 
-**Files:** Modify `wwwroot/js/tabs/display.js`, `css/app.css`; Test `tests/Glance.Ui.Tests/DisplayTabTests.cs`
-
-**Behaviour (spec §8.1):** one card per device: live preview `<img>` (`/api/preview/{key}.jpg?t=<n>` refreshed every 1 s while visible, keeping the last image on 404), name, resolution, status, `fps`, active-layout `<select>` (PUT `activeLayout`), rotation buttons (0/90/180/270 with "Flip 180°" as the prominent one). No devices → empty state "No screen found — plug in a supported display". Device without active layout → first-run call to action: "Choose a layout" (opens select) and "Create a layout" (navigates `#layouts` and starts a new one). Unsupported/retrying devices shown with their message.
-
-- [ ] **Step 1: Failing Playwright tests** — `Shows_device_card_with_preview_and_fps`, `Changing_layout_puts_activeLayout`, `Flip_180_puts_rotation`, `Preview_refresh_pauses_when_page_hidden` (emulate `visibilitychange`; assert no preview requests during 3 s hidden), `Empty_state_when_no_devices`, `First_run_call_to_action_when_no_active_layout`.
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add Display tab with live preview and quick controls`
-
----
-
-### Task 4: Editor model and property schema (pure modules)
-
-**Files:** Create `wwwroot/js/editor/model.js`, `schema.js`, `scheduler.js`; Test `tests/ui-unit/model.test.mjs`, `schema.test.mjs`, `scheduler.test.mjs`
-
+### Task 4: Editor model, property schema, render scheduler (pure TS)
+**Files:** `web/src/editor/{model,schema,scheduler}.ts` + `.test.ts`
 **Interfaces:**
-- `model.js`: `newLayout(name, width, height) → Layout` (colour background `#101820`, no items); `defaultItem(type, x, y, extra?) → Item` for all 10 types (`text, sensor, clock, image, bar, segmentedBar, arcGauge, dial, historyGraph, sparkline`) with unique `id` (`crypto.randomUUID().slice(0,8)`), defaults matching the C# model (font Inter 32/400, colours `#FFFFFF` text, gauge `#4AAFFF` / track `#33FFFFFF`, gauge size 200×200 round / 300×24 bar / 400×150 graph / 160×40 sparkline, windowSeconds 60); `sensorItem(sensorRef, label, x, y)`; `moveItem(layout, id, x, y) → Layout` (clamped to canvas, rounded to integers); `removeItem`, `duplicateItem` (offset +16,+16, new id), `updateItem(layout, id, patch)`; `toLayoutPoint(clientX, clientY, canvasRect, layoutW, layoutH) → {x,y}`; all functions return new objects (no mutation).
-- `schema.js`: `fieldsFor(type) → Field[]` where `Field = { key, label, kind: 'text'|'number'|'color'|'select'|'sensor'|'font'|'timezone'|'thresholds'|'bool'|'asset', min?, max?, step?, options? }`; numeric bounds copied from `LayoutLimits.cs` (Plan 1) — the test asserts a hard-coded copy of those bounds so drift is caught.
-- `scheduler.js`: `createRenderScheduler(renderFn, { delayMs = 150 }) → { request(layout), dispose() }` — debounced; at most one `renderFn` in flight; while in flight, only the latest requested layout is rendered next; results of superseded calls are dropped (`onResult` only for the newest).
-
-- [ ] **Step 1: Failing node tests** — defaults for every type validate against bounds; `moveItem_clamps_and_rounds`; `toLayoutPoint_scales_css_pixels_to_layout`; `functions_do_not_mutate_input`; `fieldsFor_covers_every_type`; `bounds_match_LayoutLimits`; scheduler: `debounces_rapid_requests_to_one_call`, `never_two_in_flight`, `drops_stale_results` (fake timers via `node:test` mock timers).
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add layout editor model, property schema and render scheduler`
-
----
+- `model.ts`: types `Layout`, `Item` (discriminated union on `type` for all 10 types, fields per `docs/api.md`); `newLayout(name, width, height)` (colour background `#101820`); `defaultItem(type, x, y, extra?)` (unique 8-char id; defaults: font Inter 32/400, text `#FFFFFF`, gauge `#4AAFFF` / track `#33FFFFFF`, sizes round 200×200, bar 300×24, graph 400×150, sparkline 160×40, windowSeconds 60); `sensorItem(ref, label, x, y)`; `moveItem`, `removeItem`, `duplicateItem` (+16,+16, new id), `updateItem(layout, id, patch)`; `toLayoutPoint(clientX, clientY, rect: DOMRect, w, h)`; all immutable.
+- `schema.ts`: `fieldsFor(type): Field[]`, `Field = { key; label; kind: 'text'|'number'|'color'|'select'|'sensor'|'font'|'timezone'|'thresholds'|'bool'|'asset'; min?; max?; step?; options? }`; numeric bounds copied from `src/Glance.Core/Layouts/LayoutLimits.cs` — test asserts the copy so drift is caught.
+- `scheduler.ts`: `createRenderScheduler<T, R>(renderFn: (t: T, signal: AbortSignal) => Promise<R>, onResult: (r: R) => void, { delayMs = 150 })` → `{ request(t), dispose() }`: debounced; ≤ 1 in flight; latest wins; superseded results dropped; dispose aborts.
+- [ ] Failing Vitest: defaults valid for every type vs bounds; `moveItem clamps and rounds`; `toLayoutPoint scales`; immutability; `fieldsFor covers every type`; `bounds match LayoutLimits`; scheduler `debounces`, `never two in flight`, `drops stale results` (fake timers) → FAIL → implement → PASS → **commit** `feat(ui): add layout editor model, property schema and render scheduler`.
 
 ### Task 5: Layouts tab — list, canvas, select/move, save, make active
+**Files:** `web/src/tabs/LayoutsTab.tsx`, `web/src/editor/Canvas.tsx`, `e2e/layouts-canvas.spec.ts`
+**Behaviour:** layout list (+ New, Duplicate, Rename, Delete with confirm); canvas = `<img>` of `POST /api/render` (scheduler on every edit + every 1 s for live values while visible) with absolutely positioned selection boxes from `POST /api/render/bounds`; click selects, pointer-drag moves, arrows 1 px / Shift 10 px, Delete removes, Ctrl/Cmd+D duplicates; canvas scales to width keeping aspect; toolbar Save (PUT; `{errors}` shown inline, edits kept), Make active (device choice when >1), unsaved marker; "Made for W×H" when the layout doesn't match the device canvas.
+- [ ] Failing Playwright: `selecting layout renders preview`, `drag moves item and marks unsaved`, `arrow keys nudge`, `save PUTs and clears unsaved`, `save errors shown and edits kept`, `make active PUTs activeLayout`, `rapid drags keep ≤1 render in flight`, `size mismatch warning` → FAIL → implement → PASS → **commit** `feat(ui): add layout canvas with selection, dragging and saving`.
 
-**Files:** Modify `wwwroot/js/tabs/layouts.js`; Create `wwwroot/js/editor/canvas.js`; Test `tests/Glance.Ui.Tests/LayoutsCanvasTests.cs`
-
-**Behaviour:** left column: layout list (+ New, Duplicate, Delete with confirm, rename = Duplicate+Delete flow hidden behind "Rename"); centre: canvas = `<img>` of `POST /api/render` (via scheduler on every edit and every 1 s for live values while visible) with absolutely positioned selection boxes from `POST /api/render/bounds`; click selects, drag moves (pointer events; arrow keys move 1 px, Shift+arrow 10 px; Delete removes; Ctrl/Cmd+D duplicates); canvas scales to fit width keeping aspect; toolbar: Save (PUT layout; shows `{errors}` inline), Make active (device select when >1 device, else the only device), unsaved indicator "●". Layout size mismatch with device canvas → warning text "Made for W×H" (spec §7.1).
-
-- [ ] **Step 1: Failing Playwright tests** — `Selecting_layout_loads_and_renders_preview`, `Drag_moves_item_and_marks_unsaved`, `Arrow_keys_nudge_selected_item`, `Save_puts_layout_and_clears_unsaved`, `Save_errors_are_shown_and_edits_kept` (mock returns 400 `{errors:["windowSeconds must be 1..1800"]}`), `Make_active_puts_device_activeLayout`, `Rapid_drags_issue_single_flight_render_requests` (assert ≤ 1 concurrent `/api/render` in mock), `Size_mismatch_warning_shown`.
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add layout canvas with selection, dragging and saving`
-
----
-
-### Task 6: Layouts tab — sensor tree, adding items, properties, background, unsaved guard
-
-**Files:** Create `wwwroot/js/editor/{sensor-tree,properties,background}.js`; Modify `layouts.js`; Test `tests/Glance.Ui.Tests/LayoutsEditTests.cs`
-
-**Behaviour (spec §8.2):** sensor tree under the layout list: groups by hardware (`cpu`, `gpu`, `memory`, `storage`, `motherboard`, `other`) with hardware name, live value (SSE), alias shown when set; search box filters; each sensor is draggable — dropping on the canvas adds a `sensor` item at the drop point bound to that sensor id (label = alias or sensor name); a "Roles" group lists role bindings (e.g. "CPU temperature") which drop as `role:…`. Add menu: + Text, + Clock, + Image, + Gauge ▸ (Bar, Segmented bar, Arc gauge, Dial, History graph, Sparkline) — adds at canvas centre, selected. Properties panel for the selected item generated from `schema.js` (sensor field = searchable select of sensors and roles; font = families from `/api/fonts`; timezone from `/api/timezones`; thresholds = editable rows from/colour; asset = picker with thumbnails from `/api/assets`). Background picker: Colour | Image | Animation, asset grid with thumbnails, "Import…" (file input; kind from extension `.png/.jpg/.jpeg` → image, `.gif` → gif, `.zt` → zt with a rotation prompt 0/90/180/270 defaulting to 0, explaining "rotation the file was made for"); upload progress and error message. Unsaved guard: `beforeunload` while dirty; switching layout/tab with unsaved edits → `<dialog>` Save / Discard / Cancel. Draft auto-stash to `sessionStorage` on every edit; restored after re-login (Review Focus 1).
-
-- [ ] **Step 1: Failing Playwright tests** — `Dragging_sensor_onto_canvas_adds_bound_item_at_drop_point`, `Dragging_role_adds_role_binding`, `Sensor_tree_values_update_from_events`, `Search_filters_sensor_tree`, `Add_menu_adds_each_item_type`, `Property_change_updates_layout_and_rerenders`, `Thresholds_editor_adds_and_removes_rows`, `Background_import_zt_asks_rotation_and_uploads_multipart`, `Unsaved_changes_prompt_on_layout_switch`, `Draft_restored_after_login_redirect`, `Labels_with_html_are_rendered_as_text` (alias `<img src=x onerror=alert(1)>` appears literally; no dialog).
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add sensor tree, item palette, properties and background picker`
-
----
+### Task 6: Layouts tab — sensor tree, add items, properties, background, unsaved guard
+**Files:** `web/src/editor/{SensorTree,Properties,BackgroundPicker,AddMenu}.tsx`, modify `LayoutsTab.tsx`, `e2e/layouts-edit.spec.ts`
+**Behaviour (spec §8.2):** sensor tree grouped by hardware kind with live values and aliases, search; drag a sensor onto the canvas → `sensor` item at the drop point (label = alias or name); "Roles" group drops `role:…`; Add menu (+ Text, + Clock, + Image, + Gauge ▸ Bar/Segmented bar/Arc gauge/Dial/History graph/Sparkline) adds at canvas centre and selects; properties panel generated from `schema.ts` (sensor = searchable select of sensors and roles; fonts from `/api/fonts`; time zones from `/api/timezones`; thresholds rows; asset picker with thumbnails); background picker Colour | Image | Animation with asset grid and "Import…" (kind by extension; `.zt` asks rotation 0/90/180/270, default 0, "rotation the file was made for"); unsaved guard (`beforeunload`; dialog Save/Discard/Cancel on layout/tab switch); draft stashed in `sessionStorage` per layout and restored after re-login.
+- [ ] Failing Playwright: `dragging sensor adds bound item at drop point`, `dragging role adds role binding`, `sensor tree values update live`, `search filters tree`, `add menu adds each type`, `property change rerenders`, `thresholds editor add/remove`, `zt import asks rotation and uploads multipart`, `unsaved prompt on layout switch`, `draft restored after login redirect`, `HTML in labels renders as text` → FAIL → implement → PASS → **commit** `feat(ui): add sensor tree, item palette, properties and background picker`.
 
 ### Task 7: Sensors tab
-
-**Files:** Modify `wwwroot/js/tabs/sensors.js`; Test `tests/Glance.Ui.Tests/SensorsTabTests.cs`
-
-**Behaviour (spec §8.3):** diagnostics banner(s) on top (e.g. PawnIO missing — text from API + "See the installation guide" note, no install action in Plan 2); table grouped by hardware: name, live value with unit, alias (inline edit, Enter saves via `PUT /api/sensors/alias`, Escape cancels, empty clears); Roles section: each role with its resolved sensor and a select to pin another sensor or "Automatic" (`PUT /api/roles/{role}` with `sensorId` or null); search.
-
-- [ ] **Step 1: Failing Playwright tests** — `Diagnostics_banner_shown`, `Alias_edit_saves_with_body_id`, `Clearing_alias_sends_null`, `Pin_role_and_reset_to_automatic`, `Values_update_live`.
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add Sensors tab with aliases, role pins and diagnostics`
-
----
+**Files:** `web/src/tabs/SensorsTab.tsx`, `e2e/sensors.spec.ts`
+**Behaviour (spec §8.3):** diagnostics banners (text from API; "See the installation guide" note, no install action); grouped table: name, live value + unit, alias inline edit (Enter saves `PUT /api/sensors/alias` `{id, alias}`, Escape cancels, empty clears with null); Roles section with select to pin a sensor or "Automatic" (`PUT /api/roles/{role}` `{sensorId}` / null); search.
+- [ ] Failing Playwright: `diagnostics banner`, `alias edit saves with body id`, `clearing alias sends null`, `pin role and reset to automatic`, `values update live` → FAIL → implement → PASS → **commit** `feat(ui): add Sensors tab with aliases, role pins and diagnostics`.
 
 ### Task 8: Devices tab
-
-**Files:** Modify `wwwroot/js/tabs/devices.js`; Test `tests/Glance.Ui.Tests/DevicesTabTests.cs`
-
-**Behaviour (spec §8.4):** every device: name, driver, model code, serial, status (+ message / next retry for retrying), rotation select, active layout select including "None" (PUT `{activeLayout: null}`), layout-mismatch warning; unsupported devices: card "Connected — unsupported model (code XX/YY)" with text "Support can be added by contributors; see CONTRIBUTING.md in the project repository."
-
-- [ ] **Step 1: Failing Playwright tests** — `Lists_connected_retrying_and_unsupported`, `Rotation_change_puts`, `Layout_none_clears_active_layout`, `Mismatch_warning_shown`.
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add Devices tab`
-
----
+**Files:** `web/src/tabs/DevicesTab.tsx`, `e2e/devices.spec.ts`
+**Behaviour (spec §8.4):** each device: name, driver, model code, serial, status (+ message / next retry), rotation select, layout select incl. "None" (PUT `{activeLayout: null}`), mismatch warning; unsupported: "Connected — unsupported model (code XX/YY)" + "Support can be added by contributors; see CONTRIBUTING.md in the project repository."
+- [ ] Failing Playwright: `lists connected, retrying and unsupported`, `rotation change PUTs`, `layout None clears active layout`, `mismatch warning` → FAIL → implement → PASS → **commit** `feat(ui): add Devices tab`.
 
 ### Task 9: Settings tab
-
-**Files:** Modify `wwwroot/js/tabs/settings.js`; Test `tests/Glance.Ui.Tests/SettingsTabTests.cs`
-
-**Behaviour (spec §8.5 + owner decision):** Display: temperature unit (°C/°F), 24-hour clock, **"Frame-rate cap for animations with text or gauges"** (Off, 8, 12, 15, 20, 24, Custom 1–60 → `maxOverlayAnimationFps`) with help text "Lower values use less CPU; animation speed stays the same". Access: password set/change (current required when one exists; min 8; confirm field), network access toggle (disabled with hint until a password exists), HTTPS toggle, port (1024–65535) — saving network shows "The page will reload at the new address" and navigates to the new URL after success; 409 shows "Port is in use". Logs: "Download logs" (`/api/logs`). About: version from `/api/health`, licence GPL-3.0, project link text. Logout button when authenticated remotely (`/api/auth/state`).
-
-- [ ] **Step 1: Failing Playwright tests** — `Unit_and_clock_save`, `Fps_cap_presets_and_custom_and_off`, `Network_toggle_disabled_without_password`, `Password_change_requires_current_and_confirm`, `Port_conflict_shows_message`, `Shows_version`.
-- [ ] **Step 2–4:** run (FAIL) → implement → run (PASS).
-- [ ] **Step 5: Commit** `feat(ui): add Settings tab incl. frame-rate cap and network access`
-
----
+**Files:** `web/src/tabs/SettingsTab.tsx`, `e2e/settings.spec.ts`
+**Behaviour (spec §8.5 + owner decision):** Display: °C/°F, 24-hour clock, "Frame-rate cap for animations with text or gauges" (Off, 8, 12, 15, 20, 24, Custom 1–60 → `maxOverlayAnimationFps`, help "Lower values use less CPU; animation speed stays the same"). Access: password set/change (current required when one exists; min 8; confirm), network access toggle (disabled with hint until a password exists), HTTPS toggle, port 1024–65535; after a successful network save show "The page will reload at the new address" and navigate there; 409 → "Port is in use". Logs: download `/api/logs`. About: version (`/api/health`), GPL-3.0, project link text. Logout when authenticated remotely (`/api/auth/state`).
+- [ ] Failing Playwright: `unit and clock save`, `fps cap presets/custom/off`, `network toggle disabled without password`, `password change requires current and confirm`, `port conflict message`, `shows version` → FAIL → implement → PASS → **commit** `feat(ui): add Settings tab incl. frame-rate cap and network access`.
 
 ### Task 10: Polish, accessibility, real-service smoke
-
-**Files:** Modify CSS/JS as needed; Create `tests/Glance.Ui.Tests/AccessibilityTests.cs`; Modify `docs/testing/hardware-smoke.md` (UI section)
-
-- [ ] **Step 1: Failing tests** — `All_tabs_reachable_by_keyboard`, `Interactive_controls_have_accessible_names` (every button/input/select has an accessible name via Playwright `GetByRole` lookups), `Layout_fits_360px_width_without_horizontal_scroll` for each tab, `Focus_visible_on_keyboard_navigation`.
-- [ ] **Step 2–4:** run (FAIL) → fix → run (PASS).
-- [ ] **Step 5: Owner smoke on real hardware** (controller + owner): publish to `artifacts/run`, restart service (UAC), open `http://localhost:8735`, check every tab, build a layout by dragging GPU temperature, save, make active, confirm the screen updates; enable network access from a phone on LAN with a password; record results and CPU with the UI open (informational, no target) in `hardware-smoke.md`.
-- [ ] **Step 6: Commit** `feat(ui): accessibility and responsive polish; record UI smoke results`
+**Files:** as needed; `e2e/a11y.spec.ts`; `docs/testing/hardware-smoke.md` (UI section)
+- [ ] Failing Playwright: `all tabs reachable by keyboard`, `controls have accessible names` (role-based lookups), `no horizontal scroll at 360px` (every tab), `focus visible on keyboard navigation` → FAIL → fix → PASS.
+- [ ] Owner smoke (controller + owner): `dotnet publish` to `artifacts/run`, restart service (UAC), open `http://localhost:8735`, walk every tab, build a layout by dragging GPU temperature, save, make active, screen updates; enable network access + password and open from a phone; record results and CPU with UI open (informational) in `hardware-smoke.md`.
+- [ ] **Commit** `feat(ui): accessibility and responsive polish; record UI smoke results`.
