@@ -208,3 +208,15 @@ export interface Asset {
   height: number;
   frameCount: number;
 }
+
+/** GET /api/fonts. */
+export interface FontList {
+  default: string;
+  families: string[];
+}
+
+/** GET /api/timezones item; `local` comes first. */
+export interface TimeZone {
+  id: string;
+  label: string;
+}

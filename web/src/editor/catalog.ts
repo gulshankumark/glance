@@ -1,4 +1,4 @@
-import type { Sensor, SensorsResponse } from '../api/types';
+import type { Item, ItemType, Sensor, SensorsResponse } from '../api/types';
 
 const ROLE_LABELS: Record<string, string> = {
   'cpu.temperature': 'CPU temperature',
@@ -77,3 +77,26 @@ export function matches(text: string, query: string): boolean {
 
 /** dataTransfer type of a sensor dragged from the sensor tree; the data is JSON `{ref, label}`. */
 export const SENSOR_DRAG_TYPE = 'application/x-glance-sensor';
+
+export const ITEM_LABELS: Record<ItemType, string> = {
+  text: 'Text',
+  sensor: 'Sensor',
+  clock: 'Clock',
+  image: 'Image',
+  bar: 'Bar',
+  segmentedBar: 'Segmented bar',
+  arcGauge: 'Arc gauge',
+  dial: 'Dial',
+  historyGraph: 'History graph',
+  sparkline: 'Sparkline',
+};
+
+/** "Sensor — CPU temperature", "Text — Hello": the item's kind and what it shows (never its id). */
+export function describeItem(item: Item, catalog: SensorsResponse | null): string {
+  let what: string;
+  if ('sensor' in item) what = sensorName(item.sensor, catalog);
+  else if (item.type === 'text') what = item.text || '(empty)';
+  else if (item.type === 'clock') what = item.label || (item.timeZone === 'local' ? 'Local time' : item.timeZone);
+  else what = `${item.width}×${item.height}`;
+  return `${ITEM_LABELS[item.type]} — ${what}`;
+}

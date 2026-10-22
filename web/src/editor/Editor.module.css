@@ -195,3 +195,79 @@
   color: var(--muted);
   text-align: left;
 }
+
+.leaf[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.selectedName {
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.colorRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.swatch {
+  flex: none;
+  width: 36px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: 0.875rem;
+}
+
+.fieldset {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.fieldset > legend {
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0 var(--space-1);
+}
+
+.thresholdRow {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.assetField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: 220px;
+}

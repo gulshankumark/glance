@@ -4,7 +4,10 @@ import type { DeviceView, Item, Layout, LayoutSummary } from '../api/types';
 import { AddMenu } from '../editor/AddMenu';
 import { Canvas } from '../editor/Canvas';
 import editorStyles from '../editor/Editor.module.css';
-import { addItem, newLayout, sensorItem } from '../editor/model';
+import { describeItem } from '../editor/catalog';
+import { ItemList } from '../editor/ItemList';
+import { addItem, newLayout, removeItem, sensorItem, updateItem } from '../editor/model';
+import { Properties } from '../editor/Properties';
 import { SensorTree } from '../editor/SensorTree';
 import { useEditorData } from '../editor/useEditorData';
 import { useDevices } from '../live/LiveProvider';
@@ -74,7 +77,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const [busy, setBusy] = useState(false);
   /** Changes whenever another layout is opened, so the canvas starts without the previous layout's preview. */
   const [openCount, setOpenCount] = useState(0);
-  const { catalog, assets } = useEditorData();
+  const editorData = useEditorData();
+  const { catalog, assets } = editorData;
   const loaded = useRef<Promise<{ layouts: LayoutSummary[]; devices: DeviceView[] }> | null>(null);
 
   if (!loaded.current) {
@@ -173,6 +177,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     setDoc({ ...doc, draft });
     setSelectedId(draft.items[draft.items.length - 1].id);
   };
+
+  const selected = doc?.draft.items.find((i) => i.id === selectedId) ?? null;
 
   const dirty = doc !== null && (doc.savedName === null || JSON.stringify(doc.draft) !== doc.saved);
 
@@ -394,6 +400,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
               onSelect={setSelectedId}
               onChange={(draft) => setDoc((d) => d && { ...d, draft })}
               onDropSensor={(ref, label, x, y) => insert(sensorItem(ref, label, x, y))}
+              itemName={(item) => describeItem(item, catalog)}
             />
 
             <div className={editorStyles.panels}>
@@ -403,6 +410,32 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   catalog={catalog}
                   onAdd={(ref, label) => insert(sensorItem(ref, label, doc.draft.width / 2, doc.draft.height / 2))}
                 />
+              </section>
+              <section className={editorStyles.panel} aria-label="Layout items">
+                <h3 className={editorStyles.panelTitle}>Items</h3>
+                <ItemList
+                  items={doc.draft.items}
+                  catalog={catalog}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onRemove={(id) => {
+                    if (id === selectedId) setSelectedId(null);
+                    setDoc({ ...doc, draft: removeItem(doc.draft, id) });
+                  }}
+                />
+              </section>
+              <section className={editorStyles.panel} aria-label="Properties">
+                <h3 className={editorStyles.panelTitle}>Properties</h3>
+                {selected ? (
+                  <Properties
+                    key={selected.id}
+                    item={selected}
+                    data={editorData}
+                    onChange={(patch) => setDoc((d) => d && { ...d, draft: updateItem(d.draft, selected.id, patch) })}
+                  />
+                ) : (
+                  <p className={editorStyles.muted}>Select an item to change it.</p>
+                )}
               </section>
             </div>
           </>

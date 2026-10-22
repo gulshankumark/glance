@@ -430,6 +430,28 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path === '/api/fonts') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ default: 'Inter', families: ['Inter', 'Arial', 'Bahnschrift'] }),
+      });
+      return;
+    }
+
+    if (path === '/api/timezones') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 'local', label: 'Local time' },
+          { id: 'Europe/London', label: '(UTC+00:00) Dublin, Edinburgh, Lisbon, London' },
+          { id: 'Asia/Tokyo', label: '(UTC+09:00) Osaka, Sapporo, Tokyo' },
+        ]),
+      });
+      return;
+    }
+
     if (path === '/api/assets' && method === 'GET') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(assets) });
       return;

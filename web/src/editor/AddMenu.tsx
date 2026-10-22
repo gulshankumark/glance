@@ -2,19 +2,14 @@ import React, { useState } from 'react';
 import type { Asset, Item, ItemType, Layout, SensorsResponse } from '../api/types';
 import { Button } from '../ui/Button';
 import { IMAGE_KINDS } from './assets';
-import { sensorName } from './catalog';
+import { ITEM_LABELS, sensorName } from './catalog';
 import { centered, defaultItem } from './model';
 import { AssetPicker, SensorPicker } from './pickers';
 import styles from './Editor.module.css';
 
-export const GAUGES: ReadonlyArray<{ type: ItemType; label: string }> = [
-  { type: 'bar', label: 'Bar' },
-  { type: 'segmentedBar', label: 'Segmented bar' },
-  { type: 'arcGauge', label: 'Arc gauge' },
-  { type: 'dial', label: 'Dial' },
-  { type: 'historyGraph', label: 'History graph' },
-  { type: 'sparkline', label: 'Sparkline' },
-];
+const GAUGES: ReadonlyArray<{ type: ItemType; label: string }> = (
+  ['bar', 'segmentedBar', 'arcGauge', 'dial', 'historyGraph', 'sparkline'] as const
+).map((type) => ({ type, label: ITEM_LABELS[type] }));
 
 export interface AddMenuProps {
   layout: Pick<Layout, 'width' | 'height'>;

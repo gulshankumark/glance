@@ -178,3 +178,117 @@ test.describe('Layouts editing: add menu', () => {
     expect(lastRender(api)?.items).toHaveLength(1);
   });
 });
+
+test.describe('Layouts editing: properties and items', () => {
+  const props = (page: Page) => page.getByTestId('properties');
+  const items = (page: Page) => page.getByRole('list', { name: 'Items' });
+  const itemOf = (api: MockApiHandle, id: string) =>
+    lastRender(api)?.items.find((i) => i.id === id) as unknown as Record<string, unknown> | undefined;
+
+  test('property change rerenders', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    await page.getByTestId('item-box-bar1').click();
+
+    await props(page).getByLabel('Width', { exact: true }).fill('250');
+    await props(page).getByLabel('Width', { exact: true }).press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.width).toBe(250);
+    await expect(unsaved(page)).toBeVisible();
+
+    // Out-of-range input is clamped to the schema bounds on commit.
+    await props(page).getByLabel('Height', { exact: true }).fill('99999');
+    await props(page).getByLabel('Height', { exact: true }).blur();
+    await expect.poll(() => itemOf(api, 'bar1')?.height).toBe(4096);
+    await expect(props(page).getByLabel('Height', { exact: true })).toHaveValue('4096');
+
+    await props(page).getByLabel('Sensor', { exact: true }).selectOption('role:gpu.temperature');
+    await expect.poll(() => itemOf(api, 'bar1')?.sensor).toBe('role:gpu.temperature');
+
+    await props(page).getByLabel('Colour', { exact: true }).fill('#80FF0000');
+    await props(page).getByLabel('Colour', { exact: true }).press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.color).toBe('#80FF0000');
+
+    await props(page).getByLabel('Show value').check();
+    await expect.poll(() => itemOf(api, 'bar1')?.showValue).toBe(true);
+
+    await props(page).getByLabel('Font', { exact: true }).selectOption('Bahnschrift');
+    await expect.poll(() => (itemOf(api, 'bar1')?.font as { family: string }).family).toBe('Bahnschrift');
+
+    await page.getByTestId('item-box-title').click();
+    await expect(props(page).getByLabel('Text', { exact: true })).toHaveValue('Glance');
+    await props(page).getByLabel('Text', { exact: true }).fill('Hello');
+    await expect.poll(() => itemOf(api, 'title')?.text).toBe('Hello');
+  });
+
+  test('clock time zone uses the server list', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Gaming');
+    await page.getByTestId('item-box-clock').click();
+    await props(page).getByLabel('Time zone').selectOption('Asia/Tokyo');
+    await expect.poll(() => itemOf(api, 'clock')?.timeZone).toBe('Asia/Tokyo');
+  });
+
+  test('thresholds editor add/remove', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    await page.getByTestId('item-box-bar1').click();
+
+    await props(page).getByRole('button', { name: '+ Add threshold' }).click();
+    await props(page).getByRole('button', { name: '+ Add threshold' }).click();
+    await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([
+      { from: 0, color: '#FF4444' },
+      { from: 10, color: '#FF4444' },
+    ]);
+
+    await props(page).getByLabel('Threshold 2 from').fill('80');
+    await props(page).getByLabel('Threshold 2 from').press('Enter');
+    await props(page).getByLabel('Threshold 2 colour', { exact: true }).fill('#FFAA00');
+    await props(page).getByLabel('Threshold 2 colour', { exact: true }).press('Enter');
+    await props(page).getByRole('button', { name: 'Remove threshold 1' }).click();
+    await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([{ from: 80, color: '#FFAA00' }]);
+  });
+
+  test('items list selects and deletes from the keyboard', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+
+    await expect(items(page).getByRole('button')).toHaveText(['Text — Glance', 'Sensor — CPU temperature', 'Bar — CPU']);
+    const bar = items(page).getByRole('button', { name: 'Bar — CPU' });
+    await bar.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('item-box-bar1')).toHaveAttribute('aria-pressed', 'true');
+    await expect(bar).toHaveAttribute('aria-pressed', 'true');
+    await expect(props(page).getByLabel('Width', { exact: true })).toHaveValue('400');
+
+    await items(page).getByRole('button', { name: 'Text — Glance' }).focus();
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('item-box-title')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Delete');
+    await expect.poll(() => lastRender(api)?.items.map((i) => i.id)).toEqual(['cpu', 'bar1']);
+    await expect(page.getByTestId('item-box-title')).toHaveCount(0);
+  });
+
+  test('HTML in item names and properties renders as text', async ({ page }) => {
+    const font = { family: 'Inter', size: 20, weight: 400 };
+    await mockApi(page, {
+      sensors: htmlSensors,
+      layoutDocs: [{
+        name: 'Html', width: 1280, height: 480, background: { type: 'color', color: '#000000' },
+        items: [
+          { type: 'text', id: 't', x: 1, y: 1, text: '<i>t</i>', font, color: '#FFFFFF', align: 'left' },
+          {
+            type: 'sensor', id: 's', x: 1, y: 100, sensor: 'cpu/t', label: '<b>L</b>', showUnit: true, decimals: 0,
+            font, color: '#FFFFFF', align: 'left',
+          },
+        ],
+      }],
+    });
+    await page.goto('/#layouts');
+    await page.getByRole('button', { name: 'Html', exact: true }).click();
+
+    await expect(items(page).getByRole('button')).toHaveText(['Text — <i>t</i>', `Sensor — ${htmlAlias}`]);
+    await page.getByTestId('item-box-s').click();
+    await expect(props(page).getByLabel('Label', { exact: true })).toHaveValue('<b>L</b>');
+    await expect(page.locator('main b, main i, main img[src="x"]')).toHaveCount(0);
+  });
+});
