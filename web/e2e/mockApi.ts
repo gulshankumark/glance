@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { DeviceView, LayoutSummary } from '../src/api/types';
+import type { DeviceView, Item, Layout, LayoutSummary } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
@@ -7,7 +7,12 @@ export interface MockApiOptions {
   loopback?: boolean;
   password?: string;
   devices?: DeviceView[];
-  layouts?: LayoutSummary[];
+  /** Full layout documents (the summaries of GET /api/layouts are derived from them). */
+  layoutDocs?: Layout[];
+  /** While set, PUT /api/layouts/{name} answers 400 {errors: layoutSaveErrors}; may be changed while a test runs. */
+  layoutSaveErrors?: string[];
+  /** Delay of each POST /api/render answer in ms (default 0). */
+  renderDelayMs?: number;
   /** The mock event stream fails (error instead of open) on every connection attempt. */
   eventsFail?: boolean;
   /** HTTP status of GET /api/preview/{key}.jpg (default 200 with a tiny JPEG); may be changed while a test runs. */
@@ -22,6 +27,53 @@ export interface MockApiHandle {
   closeEvents: () => Promise<void>;
   options: MockApiOptions;
   devices: DeviceView[];
+  /** The stored layouts by name. */
+  layouts: Map<string, Layout>;
+  /** Bodies of the POST /api/render requests so far. */
+  renders: () => Layout[];
+  /** The highest number of POST /api/render fetches the page had pending (not answered, not aborted) at once. */
+  maxRendersInFlight: () => Promise<number>;
+}
+
+const mockFont = (size: number) => ({ family: 'Inter', size, weight: 400 });
+
+/** Seed layouts: "Default" (a text, a sensor readout and a bar) and "Gaming" (a clock), both 1280×480. */
+export function seedLayouts(): Layout[] {
+  return [
+    {
+      name: 'Default', width: 1280, height: 480, background: { type: 'color', color: '#101820' },
+      items: [
+        { type: 'text', id: 'title', x: 40, y: 40, text: 'Glance', font: mockFont(48), color: '#FFFFFF', align: 'left' },
+        {
+          type: 'sensor', id: 'cpu', x: 40, y: 200, sensor: 'role:cpu.temperature', label: 'CPU', showUnit: true,
+          decimals: 0, font: mockFont(32), color: '#FFFFFF', align: 'left',
+        },
+        {
+          type: 'bar', id: 'bar1', x: 600, y: 300, width: 400, height: 30, sensor: 'cpu/t', color: '#4AAFFF',
+          trackColor: '#33FFFFFF', thresholds: [], showValue: false, font: mockFont(16), vertical: false, rounded: true,
+        },
+      ],
+    },
+    {
+      name: 'Gaming', width: 1280, height: 480, background: { type: 'color', color: '#000000' },
+      items: [{ type: 'clock', id: 'clock', x: 500, y: 200, timeZone: 'local', font: mockFont(64), color: '#FFFFFF', align: 'left' }],
+    },
+  ];
+}
+
+/** Bounds like the server's: text-like items get a rough ink box (0×0 for an empty string), others their box. */
+function mockBounds(layout: Layout): Record<string, { x: number; y: number; width: number; height: number }> {
+  const result: Record<string, { x: number; y: number; width: number; height: number }> = {};
+  for (const item of layout.items as Item[]) {
+    if (item.type === 'text' || item.type === 'sensor' || item.type === 'clock') {
+      const text = item.type === 'text' ? item.text : item.type === 'clock' ? '12:34' : `${item.label ?? ''} 55°C`;
+      const w = text.length * item.font.size * 0.5;
+      result[item.id] = { x: item.x, y: item.y + 4, width: w, height: text ? item.font.size * 0.8 : 0 };
+    } else {
+      result[item.id] = { x: item.x, y: item.y, width: item.width, height: item.height };
+    }
+  }
+  return result;
 }
 
 // 1x1 black JPEG
@@ -73,10 +125,12 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
 
   const devices: DeviceView[] = options.devices !== undefined ? [...options.devices] : [seedDevice()];
 
-  const layouts = options.layouts !== undefined ? [...options.layouts] : [
-    { name: 'Default', width: 1280, height: 480, error: null },
-    { name: 'Gaming', width: 1280, height: 480, error: null },
-  ];
+  const layouts = new Map<string, Layout>((options.layoutDocs ?? seedLayouts()).map((l) => [l.name, l]));
+  const summaries = (): LayoutSummary[] =>
+    [...layouts.values()]
+      .map((l) => ({ name: l.name, width: l.width, height: l.height, error: null }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const renders: Layout[] = [];
 
   const defaultSensors = {
     sensors: [
@@ -151,6 +205,21 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       }
 
       (window as unknown as { EventSource: typeof MockEventSource }).EventSource = MockEventSource;
+
+      // Count the page's pending POST /api/render fetches (an abort settles a fetch at once).
+      const w = window as unknown as { __rendersInFlight: number; __maxRendersInFlight: number };
+      w.__rendersInFlight = 0;
+      w.__maxRendersInFlight = 0;
+      const realFetch = window.fetch.bind(window);
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (!/\/api\/render(\?|$)/.test(url)) return realFetch(input, init);
+        w.__rendersInFlight++;
+        w.__maxRendersInFlight = Math.max(w.__maxRendersInFlight, w.__rendersInFlight);
+        return realFetch(input, init).finally(() => {
+          w.__rendersInFlight--;
+        });
+      };
     },
     { fail: !!opts.eventsFail },
   );
@@ -279,8 +348,57 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(layouts),
+        body: JSON.stringify(summaries()),
       });
+      return;
+    }
+
+    const layoutMatch = /^\/api\/layouts\/([^/]+)(\/duplicate)?$/.exec(path);
+    if (layoutMatch) {
+      const name = decodeURIComponent(layoutMatch[1]);
+      const json = (status: number, data?: unknown) =>
+        route.fulfill({ status, contentType: 'application/json', body: data === undefined ? '' : JSON.stringify(data) });
+      if (layoutMatch[2] && method === 'POST') {
+        const newName = (body as { newName?: string })?.newName ?? '';
+        const src = layouts.get(name);
+        if (!src) return json(404);
+        if (!/^[A-Za-z0-9 _-]{1,64}$/.test(newName) || newName.endsWith(' ')) {
+          return json(400, { errors: ['invalid layout name'] });
+        }
+        if (layouts.has(newName)) return json(409, { errors: ['a layout with that name already exists'] });
+        layouts.set(newName, { ...structuredClone(src), name: newName });
+        return json(200);
+      }
+      if (method === 'GET') {
+        const doc = layouts.get(name);
+        return doc ? json(200, doc) : json(404);
+      }
+      if (method === 'PUT') {
+        const doc = body as Layout;
+        if (opts.layoutSaveErrors?.length) return json(400, { errors: opts.layoutSaveErrors });
+        if (doc?.name !== name) return json(400, { errors: ['name must match the layout name in the path'] });
+        layouts.set(name, doc);
+        return json(200);
+      }
+      if (method === 'DELETE') {
+        if (!layouts.delete(name)) return json(404);
+        return route.fulfill({ status: 204, body: '' });
+      }
+    }
+
+    if (path === '/api/render' && method === 'POST') {
+      renders.push(body as Layout);
+      try {
+        if (opts.renderDelayMs) await new Promise((r) => setTimeout(r, opts.renderDelayMs));
+        await route.fulfill({ status: 200, contentType: 'image/jpeg', body: dummyJpeg });
+      } catch {
+        // the page aborted the request
+      }
+      return;
+    }
+
+    if (path === '/api/render/bounds' && method === 'POST') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockBounds(body as Layout)) });
       return;
     }
 
@@ -314,6 +432,10 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     previewRequests: () => calls.filter((c) => c.path.startsWith('/api/preview/')).length,
     options: opts,
     devices,
+    layouts,
+    renders: () => [...renders],
+    maxRendersInFlight: () =>
+      page.evaluate(() => (window as unknown as { __maxRendersInFlight: number }).__maxRendersInFlight),
     sendEvent: async (event: string, data: unknown) => {
       await page.evaluate(
         ({ ev, d }) => {
