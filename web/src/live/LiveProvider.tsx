@@ -54,6 +54,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       es.addEventListener('sensors', (e) => {
+        setStatus('open');
         try {
           const data = JSON.parse(e.data);
           setSensorValues((prev) => ({ ...prev, ...data }));
@@ -63,6 +64,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       es.addEventListener('devices', (e) => {
+        setStatus('open');
         try {
           const data = JSON.parse(e.data);
           setDevices(data);

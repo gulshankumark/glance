@@ -1,7 +1,8 @@
 export interface DeviceView {
   key: string;
-  driver: string;
-  serial: string;
+  driver?: string;
+  driverId?: string;
+  serial?: string;
   name: string;
   width: number;
   height: number;
@@ -10,9 +11,9 @@ export interface DeviceView {
   message: string | null;
   nextRetry: string | null;
   activeLayout: string | null;
-  layoutMismatch: boolean;
-  fps: number;
-  framesSent: number;
+  layoutMismatch?: boolean;
+  fps?: number;
+  framesSent?: number;
 }
 
 export interface Sensor {

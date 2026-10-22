@@ -146,7 +146,7 @@ export const DisplayTab: React.FC<{ navigate: (hash: string) => void }> = ({ nav
                   </span>
                 </span>
                 <span className={styles.fpsBadge}>
-                  {device.fps.toFixed(1)} fps
+                  {(device.fps ?? 0).toFixed(1)} fps
                 </span>
               </div>
 
