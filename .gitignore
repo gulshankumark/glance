@@ -485,3 +485,9 @@ $RECYCLE.BIN/
 .superpowers/
 artifacts/
 
+
+# Web UI build outputs and dependencies
+src/Glance.Service/wwwroot/
+web/node_modules/
+web/test-results/
+web/playwright-report/

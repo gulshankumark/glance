@@ -20,3 +20,21 @@ Glance is licensed under GPL-3.0. Each NuGet dependency added to the project is 
 | Inter 4.1 (Inter-Regular.ttf, Inter-Bold.ttf, embedded font resources) | Glance.Core (default font) | SIL OFL-1.1 |
 
 Inter font: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter), licensed under the SIL Open Font License 1.1 (https://openfontlicense.org).
+
+## Web UI npm packages
+
+| Package | Used by | License |
+|---|---|---|
+| react 18.3.1 | web UI runtime | MIT |
+| react-dom 18.3.1 | web UI runtime | MIT |
+| @types/react 18.3.18 | web UI types | MIT |
+| @types/react-dom 18.3.5 | web UI types | MIT |
+| @vitejs/plugin-react 4.3.4 | web UI build | MIT |
+| vite 5.4.14 | web UI build / bundler | MIT |
+| typescript 5.7.3 | web UI typechecker | Apache-2.0 |
+| vitest 2.1.8 | web UI unit tests | MIT |
+| @testing-library/react 16.2.0 | web UI component tests | MIT |
+| @testing-library/dom 10.4.0 | web UI component tests | MIT |
+| jsdom 26.0.0 | web UI test DOM environment | MIT |
+| @playwright/test 1.50.1 | web UI e2e browser tests | Apache-2.0 |
+| @types/node 22.13.1 | web UI test types | MIT |

@@ -16,4 +16,23 @@
     <ProjectReference Include="..\Glance.Sensors.Windows\Glance.Sensors.Windows.csproj" />
     <ProjectReference Include="..\Glance.Platform.Windows\Glance.Platform.Windows.csproj" />
   </ItemGroup>
+
+  <Target Name="BuildWebUi" BeforeTargets="BeforePublish">
+    <Exec Command="node --version" ContinueOnError="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ExitCode" PropertyName="NodeExitCode" />
+    </Exec>
+    <Exec Command="npm --version" ContinueOnError="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ExitCode" PropertyName="NpmExitCode" />
+    </Exec>
+    <Error Condition="'$(NodeExitCode)' != '0' Or '$(NpmExitCode)' != '0'" Text="Building Glance.Service for publish requires Node.js (>=20) and npm, but they were not found on PATH." />
+    <Exec Command="npm ci" WorkingDirectory="$(MSBuildThisFileDirectory)..\..\web" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildThisFileDirectory)..\..\web" />
+  </Target>
+
+  <Target Name="PublishWebUi" AfterTargets="BuildWebUi;CopyFilesToPublishDirectory">
+    <ItemGroup>
+      <_WebUiFiles Include="$(MSBuildThisFileDirectory)wwwroot\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_WebUiFiles)" DestinationFiles="@(_WebUiFiles->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 </Project>

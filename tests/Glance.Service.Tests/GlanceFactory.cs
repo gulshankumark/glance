@@ -26,6 +26,10 @@ public sealed class GlanceFactory : WebApplicationFactory<Program>
         Driver = new FakeDriver { Always = () => new ConnectResult.Connected(Connection) };
         Usb = new FakeEnumerator();
         if (withDevice) Usb.Add(new UsbDeviceInfo(0x1234, 0x0001, "fake-path", 37, 513, "Fake"));
+
+        var webRoot = Path.Combine(_dir.Path, "wwwroot");
+        Directory.CreateDirectory(webRoot);
+        File.WriteAllText(Path.Combine(webRoot, "index.html"), "<!doctype html><title>Glance</title><p>Glance is running.</p>");
     }
 
     public string DataDir => _dir.Path;
@@ -36,6 +40,7 @@ public sealed class GlanceFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseWebRoot(Path.Combine(_dir.Path, "wwwroot"));
         builder.UseSetting("Glance:MaxUploadBytes", "65536");   // keeps the oversize-upload test small
         builder.ConfigureServices(s =>
         {
