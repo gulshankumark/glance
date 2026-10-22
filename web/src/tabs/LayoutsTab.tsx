@@ -112,32 +112,52 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     setNotice(null);
   }, []);
 
-  const startNew = useCallback(
-    (layouts: LayoutSummary[], devs: DeviceView[]) => {
-      const size = devs.length > 0 ? canvasSize(devs[0]) : FALLBACK_SIZE;
-      open({ savedName: null, draft: newLayout(unusedName(layouts), size.width, size.height), saved: '' });
-    },
-    [open],
-  );
+  // Opening a layout or starting a new one: only the latest of these wins (stale answers are dropped).
+  const openSeq = useRef(0);
+  const openAbort = useRef<AbortController | null>(null);
+  const nextOpen = () => {
+    openAbort.current?.abort();
+    openAbort.current = new AbortController();
+    return { seq: ++openSeq.current, signal: openAbort.current.signal };
+  };
+  const summariesRef = useRef(summaries);
+  summariesRef.current = summaries;
+  const devicesRef = useRef(devices);
+  devicesRef.current = devices;
 
-  // "#layouts/new" (the Display tab's "Create a layout") opens a new unsaved layout once the lists are known.
+  /** A new unsaved layout named after the current layout list, sized for the first connected screen. */
+  const startNew = useCallback(async () => {
+    const { seq, signal } = nextOpen();
+    const [layouts, devs] = await Promise.all([
+      api<LayoutSummary[]>('GET', '/api/layouts', undefined, { signal }).catch(() => null),
+      api<DeviceView[]>('GET', '/api/devices', undefined, { signal }).catch(() => null),
+    ]);
+    if (seq !== openSeq.current) return;
+    if (layouts) setSummaries(layouts);
+    const screen = (devs ?? devicesRef.current ?? []).find(
+      (d) => d.status === 'connected' && d.width > 0 && d.height > 0,
+    );
+    const size = screen ? canvasSize(screen) : FALLBACK_SIZE;
+    const name = unusedName(layouts ?? summariesRef.current ?? []);
+    open({ savedName: null, draft: newLayout(name, size.width, size.height), saved: '' });
+  }, [open]);
+
+  // "#layouts/new" (the Display tab's "Create a layout") opens a new unsaved layout; the URL becomes "#layouts" so
+  // a reload or Back does not start another one (the hashchange event keeps the app's route in step).
   useEffect(() => {
     if (route !== '#layouts/new') return;
-    let cancelled = false;
-    loaded.current!.then(({ layouts, devices: list }) => {
-      if (!cancelled) startNew(layouts, list);
-    });
-    return () => {
-      cancelled = true;
-    };
+    window.history.replaceState(null, '', '#layouts');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    void startNew();
   }, [route, startNew]);
 
   const openLayout = async (name: string) => {
+    const { seq, signal } = nextOpen();
     try {
-      const layout = await api<Layout>('GET', layoutPath(name));
-      open({ savedName: name, draft: layout, saved: JSON.stringify(layout) });
+      const layout = await api<Layout>('GET', layoutPath(name), undefined, { signal });
+      if (seq === openSeq.current) open({ savedName: name, draft: layout, saved: JSON.stringify(layout) });
     } catch (e) {
-      setNotice(errorText(e, `Layout ${name} could not be opened.`));
+      if (seq === openSeq.current) setNotice(errorText(e, `Layout ${name} could not be opened.`));
     }
   };
 
@@ -255,7 +275,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
           <Button
             variant="secondary"
             disabled={summaries === null}
-            onClick={() => summaries && startNew(summaries, devices ?? [])}
+            onClick={() => void startNew()}
           >
             + New
           </Button>

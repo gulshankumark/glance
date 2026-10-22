@@ -286,3 +286,105 @@ test.describe('Layouts canvas', () => {
     await expect(page.getByRole('dialog')).toContainText('a layout with that name already exists');
   });
 });
+
+async function setVisibility(page: Page, state: 'hidden' | 'visible') {
+  await page.evaluate((s) => {
+    Object.defineProperty(document, 'visibilityState', { value: s, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+test.describe('Layouts canvas (review fixes)', () => {
+  test('slow renders are not cancelled by the live refresh', async ({ page }) => {
+    const api = await mockApi(page, { renderDelayMs: 1200 });
+    await openLayout(page, 'Default');
+
+    await expect.poll(() => previewLoaded(page), { timeout: 5000 }).toBe(true);
+    const shown = await preview(page).getAttribute('src');
+    // It keeps updating: a later frame replaces the first one.
+    await expect.poll(() => preview(page).getAttribute('src'), { timeout: 5000 }).not.toBe(shown);
+    expect(api.renders().length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('live refresh stops while hidden and resumes when visible', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+
+    await setVisibility(page, 'hidden');
+    await page.waitForTimeout(300);
+    const whileHidden = api.renders().length;
+    await page.waitForTimeout(2500);
+    expect(api.renders().length).toBe(whileHidden);
+
+    await setVisibility(page, 'visible');
+    await expect.poll(() => api.renders().length, { timeout: 1500 }).toBeGreaterThan(whileHidden);
+  });
+
+  test('only the item boxes take over touch gestures', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await mockApi(page);
+    await openLayout(page, 'Default');
+
+    const touch = (l: ReturnType<typeof canvas>) => l.evaluate((el) => getComputedStyle(el).touchAction);
+    expect(await touch(canvas(page))).not.toBe('none');
+    expect(await touch(box(page, 'title'))).toBe('none');
+  });
+
+  test('opening layouts quickly: the last click wins', async ({ page }) => {
+    await mockApi(page, { layoutGetDelayMs: { Default: 800 } });
+    await page.goto('/#layouts');
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await page.getByRole('button', { name: 'Gaming', exact: true }).click();
+
+    await expect(page.getByTestId('layout-title')).toContainText('Gaming');
+    await page.waitForTimeout(1200);
+    await expect(page.getByTestId('layout-title')).toContainText('Gaming');
+  });
+
+  test('a reload after #layouts/new does not start a second draft', async ({ page }) => {
+    await mockApi(page);
+    await page.goto('/#layouts/new');
+    await expect(page.getByTestId('layout-title')).toContainText('New layout 1');
+    await expect(page).toHaveURL(/#layouts$/);
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
+    await expect(page.getByTestId('layout-title')).toHaveCount(0);
+  });
+
+  test('the new layout name uses the current layout list', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#layouts');
+    await expect(page.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
+
+    // Another browser saved "New layout 1" since this tab loaded its list.
+    api.layouts.set('New layout 1', { ...api.layouts.get('Gaming')!, name: 'New layout 1' });
+    await page.evaluate(() => {
+      window.location.hash = '#layouts/new';
+    });
+    await expect(page.getByTestId('layout-title')).toContainText('New layout 2');
+
+    api.layouts.set('New layout 2', { ...api.layouts.get('Gaming')!, name: 'New layout 2' });
+    await page.getByRole('button', { name: '+ New' }).click();
+    await expect(page.getByTestId('layout-title')).toContainText('New layout 3');
+  });
+
+  test('a new layout takes the size of the first connected screen', async ({ page }) => {
+    await mockApi(page, {
+      devices: [
+        seedDevice({ key: 'x_BAD', serial: 'BAD', status: 'unsupported', width: 0, height: 0 }),
+        seedDevice({ key: 'x_RETRY', serial: 'RETRY', status: 'retrying', width: 320, height: 240 }),
+        seedDevice({ rotation: 90 }),
+      ],
+    });
+    await page.goto('/#layouts/new');
+    await expect(page.getByTestId('layout-title')).toContainText('480×1280');
+  });
+
+  test('a new layout without a connected screen is 1280×480', async ({ page }) => {
+    await mockApi(page, { devices: [seedDevice({ status: 'unsupported', width: 0, height: 0 })] });
+    await page.goto('/#layouts/new');
+    await expect(page.getByTestId('layout-title')).toContainText('1280×480');
+  });
+});

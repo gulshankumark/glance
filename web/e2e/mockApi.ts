@@ -11,6 +11,8 @@ export interface MockApiOptions {
   layoutDocs?: Layout[];
   /** While set, PUT /api/layouts/{name} answers 400 {errors: layoutSaveErrors}; may be changed while a test runs. */
   layoutSaveErrors?: string[];
+  /** Delay of GET /api/layouts/{name} answers in ms, by layout name. */
+  layoutGetDelayMs?: Record<string, number>;
   /** Delay of each POST /api/render answer in ms (default 0). */
   renderDelayMs?: number;
   /** The mock event stream fails (error instead of open) on every connection attempt. */
@@ -370,6 +372,8 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
         return json(200);
       }
       if (method === 'GET') {
+        const delay = opts.layoutGetDelayMs?.[name];
+        if (delay) await new Promise((r) => setTimeout(r, delay));
         const doc = layouts.get(name);
         return doc ? json(200, doc) : json(404);
       }

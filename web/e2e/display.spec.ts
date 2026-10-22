@@ -183,6 +183,7 @@ test.describe('Display Tab', () => {
     await page.goto('/#display');
 
     await page.getByRole('button', { name: 'Create a layout' }).click();
-    await expect(page).toHaveURL(/#layouts\/new$/);
+    await expect(page.getByTestId('layout-title')).toContainText('New layout 1');
+    await expect(page).toHaveURL(/#layouts$/);
   });
 });
