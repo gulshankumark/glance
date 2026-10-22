@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { FontSpec, Item, Threshold } from '../api/types';
 import { Button } from '../ui/Button';
 import { Field as FieldBox } from '../ui/Field';
@@ -79,15 +79,28 @@ const FontEditor: React.FC<{ value: FontSpec; fonts: string[] | null; onCommit: 
   );
 };
 
+/**
+ * Threshold rows keyed by a stable id that follows each row when the list is re-sorted (kept ascending by `from`),
+ * so an input that is still focused after Enter keeps editing the same row.
+ */
 const ThresholdsEditor: React.FC<{ value: Threshold[]; onCommit: (v: Threshold[]) => void }> = ({ value, onCommit }) => {
+  const nextKey = useRef(0);
+  const keys = useRef<number[]>([]);
+  if (keys.current.length !== value.length) keys.current = value.map(() => nextKey.current++);
+  const commit = (rows: Array<{ t: Threshold; key: number }>) => {
+    const sorted = [...rows].sort((a, b) => a.t.from - b.t.from);
+    keys.current = sorted.map((r) => r.key);
+    onCommit(sorted.map((r) => r.t));
+  };
+  const rows = () => value.map((t, i) => ({ t, key: keys.current[i] }));
   const set = (i: number, patch: Partial<Threshold>) =>
-    onCommit(value.map((t, j) => (j === i ? { ...t, ...patch } : t)).sort((a, b) => a.from - b.from));
+    commit(rows().map((r, j) => (j === i ? { ...r, t: { ...r.t, ...patch } } : r)));
   return (
     <fieldset className={styles.fieldset}>
       <legend>Thresholds</legend>
       {value.length === 0 && <p className={styles.hint}>None: the gauge uses its colour throughout.</p>}
       {value.map((t, i) => (
-        <div key={i} className={styles.thresholdRow}>
+        <div key={keys.current[i]} className={styles.thresholdRow}>
           <NumberInput
             aria-label={`Threshold ${i + 1} from`}
             field={thresholdFromField}
@@ -104,13 +117,20 @@ const ThresholdsEditor: React.FC<{ value: Threshold[]; onCommit: (v: Threshold[]
             type="button"
             variant="secondary"
             aria-label={`Remove threshold ${i + 1}`}
-            onClick={() => onCommit(value.filter((_, j) => j !== i))}
+            onClick={() => commit(rows().filter((_, j) => j !== i))}
           >
             ✕
           </Button>
         </div>
       ))}
-      <Button type="button" variant="secondary" onClick={() => onCommit(addThreshold(value))}>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => {
+          const added = addThreshold(value);
+          commit([...rows(), { t: added[added.length - 1], key: nextKey.current++ }]);
+        }}
+      >
         + Add threshold
       </Button>
     </fieldset>

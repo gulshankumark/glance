@@ -248,6 +248,39 @@ test.describe('Layouts editing: properties and items', () => {
     await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([{ from: 80, color: '#FFAA00' }]);
   });
 
+  test('a threshold row moved by Enter keeps its values after blur', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    await page.getByTestId('item-box-bar1').click();
+
+    await props(page).getByRole('button', { name: '+ Add threshold' }).click();
+    await props(page).getByRole('button', { name: '+ Add threshold' }).click();
+    await props(page).getByLabel('Threshold 1 colour', { exact: true }).fill('#00FF00');
+    await props(page).getByLabel('Threshold 1 colour', { exact: true }).press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([
+      { from: 0, color: '#00FF00' },
+      { from: 10, color: '#FF4444' },
+    ]);
+
+    // Row 2 moves above row 1 on Enter; leaving its input afterwards must not overwrite the other row.
+    const from2 = props(page).getByLabel('Threshold 2 from');
+    await from2.fill('-5');
+    await from2.press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([
+      { from: -5, color: '#FF4444' },
+      { from: 0, color: '#00FF00' },
+    ]);
+    await page.keyboard.press('Tab');
+    await page.getByTestId('item-box-bar1').click();
+    await page.waitForTimeout(400);
+    expect(itemOf(api, 'bar1')?.thresholds).toEqual([
+      { from: -5, color: '#FF4444' },
+      { from: 0, color: '#00FF00' },
+    ]);
+    await expect(props(page).getByLabel('Threshold 1 from')).toHaveValue('-5');
+    await expect(props(page).getByLabel('Threshold 2 from')).toHaveValue('0');
+  });
+
   test('items list selects and deletes from the keyboard', async ({ page }) => {
     const api = await mockApi(page);
     await openLayout(page, 'Default');
