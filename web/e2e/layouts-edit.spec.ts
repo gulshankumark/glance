@@ -376,3 +376,127 @@ test('the image picker imports an image that can then be picked', async ({ page 
   await expect.poll(() => lastRender(api)?.items.at(-1)).toMatchObject({ type: 'image', assetId: 'up1' });
   expect(api.uploads[0]).toMatchObject({ kind: 'image', fileName: 'logo.png' });
 });
+
+test.describe('Layouts editing: unsaved changes', () => {
+  const guard = (page: Page) => page.getByRole('dialog', { name: 'Unsaved changes' });
+  const title = (page: Page) => page.getByTestId('layout-title');
+  const titleX = (layout: Layout | undefined) => layout?.items.find((i) => i.id === 'title')?.x;
+
+  async function editDefault(page: Page, api: MockApiHandle, x: number) {
+    await page.getByTestId('item-box-title').click();
+    await page.keyboard.press('ArrowRight');
+    await expect(unsaved(page)).toBeVisible();
+    await expect.poll(() => titleX(lastRender(api))).toBe(x);
+  }
+
+  test('unsaved prompt on layout switch', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    await editDefault(page, api, 41);
+
+    // Cancel keeps everything.
+    await page.getByRole('button', { name: 'Gaming', exact: true }).click();
+    await expect(guard(page)).toContainText('Default has unsaved changes');
+    await guard(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(guard(page)).toBeHidden();
+    await expect(title(page)).toContainText('Default');
+    await expect(unsaved(page)).toBeVisible();
+
+    // "+ New" asks too.
+    await page.getByRole('button', { name: '+ New' }).click();
+    await guard(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(title(page)).toContainText('Default');
+
+    // A failing save keeps the dialog, the errors and the edits.
+    api.options.layoutSaveErrors = ["item 'title': bad"];
+    await page.getByRole('button', { name: 'Gaming', exact: true }).click();
+    await guard(page).getByRole('button', { name: 'Save' }).click();
+    await expect(guard(page)).toContainText("item 'title': bad");
+    await expect(title(page)).toContainText('Default');
+    await expect(unsaved(page)).toBeVisible();
+
+    // Saving then switches.
+    api.options.layoutSaveErrors = undefined;
+    await guard(page).getByRole('button', { name: 'Save' }).click();
+    await expect(title(page)).toContainText('Gaming');
+    expect(titleX(api.layouts.get('Default'))).toBe(41);
+
+    // Discard drops the edits and switches.
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await editDefault(page, api, 42);
+    await page.getByRole('button', { name: 'Gaming', exact: true }).click();
+    await guard(page).getByRole('button', { name: 'Discard' }).click();
+    await expect(title(page)).toContainText('Gaming');
+    await expect(unsaved(page)).toBeHidden();
+    expect(titleX(api.layouts.get('Default'))).toBe(41);
+    expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  });
+
+  test('unsaved prompt on tab switch and page close', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Default');
+    const closing = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+    expect(await closing()).toBe(false);
+
+    await editDefault(page, api, 41);
+    expect(await closing()).toBe(true);
+
+    await page.locator('nav a[href="#display"]').click();
+    await expect(guard(page)).toBeVisible();
+    await guard(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page).toHaveURL(/#layouts$/);
+    await expect(unsaved(page)).toBeVisible();
+
+    await page.locator('nav a[href="#display"]').click();
+    await guard(page).getByRole('button', { name: 'Discard' }).click();
+    await expect(page).toHaveURL(/#display$/);
+    expect(await closing()).toBe(false);
+  });
+
+  test('draft restored after login redirect', async ({ page }) => {
+    const api = await mockApi(page, { loopback: false, networkAccess: true, authenticated: true });
+    await openLayout(page, 'Default');
+    await editDefault(page, api, 41);
+
+    // The session expires: the next request (the live preview refresh) answers 401.
+    api.options.authenticated = false;
+    await expect(page).toHaveURL(/#login\?return=%23layouts$/);
+    // Even a reload of the login page keeps the draft (only a load straight into the editor drops it).
+    await page.reload();
+    await page.getByLabel('Password').fill('password123');
+    await page.getByRole('button', { name: 'Log in' }).click();
+
+    await expect(page).toHaveURL(/#layouts$/);
+    await expect(title(page)).toContainText('Default');
+    await expect(unsaved(page)).toBeVisible();
+    await expect.poll(() => titleX(lastRender(api))).toBe(41);
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(unsaved(page)).toBeHidden();
+    expect(titleX(api.layouts.get('Default'))).toBe(41);
+    expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  });
+
+  test('a restored new layout keeps its unsaved marker', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#layouts/new');
+    await expect(title(page)).toContainText('New layout 1');
+    await page.getByTestId('add-menu').getByRole('button', { name: '+ Text' }).click();
+    await expect.poll(() => lastRender(api)?.items.length).toBe(1);
+
+    await page.evaluate(() => {
+      window.location.hash = '#settings'; // leaving without the in-app links (e.g. Back) skips the prompt
+    });
+    await page.evaluate(() => {
+      window.location.hash = '#layouts';
+    });
+    await expect(title(page)).toContainText('New layout 1');
+    await expect(unsaved(page)).toBeVisible();
+    await expect.poll(() => lastRender(api)?.items[0]?.type).toBe('text');
+  });
+});

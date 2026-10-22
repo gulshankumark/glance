@@ -12,6 +12,7 @@ import { ItemList } from '../editor/ItemList';
 import { addItem, newLayout, removeItem, sensorItem, updateItem } from '../editor/model';
 import { Properties } from '../editor/Properties';
 import { SensorTree } from '../editor/SensorTree';
+import { clearStash, readStash, writeStash } from '../editor/draftStash';
 import { useEditorData } from '../editor/useEditorData';
 import { useDevices } from '../live/LiveProvider';
 import { Banner } from '../ui/Banner';
@@ -68,16 +69,35 @@ const dialogTexts: Record<DialogState['kind'], { title: (name: string) => string
   activate: { title: (n) => `Show ${n} on…`, action: 'Make active' },
 };
 
-export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: string }> = ({ route }) => {
+/**
+ * A page load straight into the Layouts tab follows a confirmed "leave page" prompt (reload, closed tab): its stash
+ * is dropped. Loads elsewhere (e.g. the login page after a 401) and in-app navigation keep it.
+ */
+let dropStashOnFirstMount = window.location.hash.startsWith('#layouts');
+
+/** Restores a draft stashed before leaving the editor (e.g. for the login page after a 401). */
+function restoredDoc(): Doc | null {
+  if (dropStashOnFirstMount) {
+    dropStashOnFirstMount = false;
+    clearStash();
+    return null;
+  }
+  const s = readStash();
+  return s && { savedName: s.layoutName, draft: s.draft, saved: s.savedVersion };
+}
+
+export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: string }> = ({ navigate, route }) => {
   const liveDevices = useDevices();
   const [summaries, setSummaries] = useState<LayoutSummary[] | null>(null);
   const [devices, setDevices] = useState<DeviceView[] | null>(null);
-  const [doc, setDoc] = useState<Doc | null>(null);
+  const [doc, setDoc] = useState<Doc | null>(restoredDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveErrors, setSaveErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The action waiting for the user to save or discard unsaved edits (Save / Discard / Cancel dialog). */
+  const [pending, setPending] = useState<{ run: () => void; errors: string[] } | null>(null);
   /** Changes whenever another layout is opened, so the canvas starts without the previous layout's preview. */
   const [openCount, setOpenCount] = useState(0);
   const editorData = useEditorData();
@@ -160,7 +180,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     if (route !== '#layouts/new') return;
     window.history.replaceState(null, '', '#layouts');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-    void startNew();
+    guardRef.current(() => void startNew());
   }, [route, startNew]);
 
   const openLayout = async (name: string) => {
@@ -188,12 +208,53 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
 
   const dirty = doc !== null && (doc.savedName === null || JSON.stringify(doc.draft) !== doc.saved);
 
-  const save = async () => {
-    if (!doc) return;
+  // Every edit is stashed, so leaving without a prompt (a 401, Back) loses nothing; a clean editor clears it.
+  useEffect(() => {
+    if (doc && dirty) writeStash({ layoutName: doc.savedName, draft: doc.draft, savedVersion: doc.saved });
+    else clearStash();
+  }, [doc, dirty]);
+
+  // Closing or reloading the page with unsaved edits asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  /** Runs `action` now, or after the user saved or discarded the unsaved edits. */
+  const guard = (action: () => void) => {
+    if (dirty) setPending({ run: action, errors: [] });
+    else action();
+  };
+  const guardRef = useRef(guard);
+  guardRef.current = guard;
+
+  // Switching tab through the app's links with unsaved edits asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const href = (e.target as Element | null)?.closest?.('a[href^="#"]')?.getAttribute('href');
+      if (!href || href.startsWith('#layouts')) return;
+      e.preventDefault();
+      setPending({ run: () => navigate(href), errors: [] });
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, [dirty, navigate]);
+
+  /** Saves the draft; returns the problems (empty when it was saved). */
+  const save = async (): Promise<string[]> => {
+    if (!doc) return [];
     const { draft } = doc;
     if (doc.savedName === null && summaries?.some((s) => sameName(s.name, draft.name))) {
-      setSaveErrors([`A layout named ${draft.name} already exists; rename this one first.`]);
-      return;
+      const errors = [`A layout named ${draft.name} already exists; rename this one first.`];
+      setSaveErrors(errors);
+      return errors;
     }
     setBusy(true);
     try {
@@ -202,11 +263,35 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
       setDoc((d) => d && { ...d, savedName: draft.name, saved: JSON.stringify(draft) });
       setSaveErrors([]);
       await reloadSummaries();
+      return [];
     } catch (e) {
-      setSaveErrors(e instanceof ApiError ? e.errors : ['The layout could not be saved.']);
+      const errors = e instanceof ApiError ? e.errors : ['The layout could not be saved.'];
+      setSaveErrors(errors);
+      return errors;
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveThenContinue = async () => {
+    if (!pending) return;
+    const errors = await save();
+    if (errors.length > 0) {
+      setPending({ ...pending, errors });
+      return;
+    }
+    setPending(null);
+    pending.run();
+  };
+
+  const discardThenContinue = () => {
+    if (!pending || !doc) return;
+    clearStash();
+    setDoc(doc.savedName === null ? null : { ...doc, draft: JSON.parse(doc.saved) as Layout });
+    setSelectedId(null);
+    setSaveErrors([]);
+    setPending(null);
+    pending.run();
   };
 
   const activate = async (deviceKey: string) => {
@@ -300,7 +385,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
           <Button
             variant="secondary"
             disabled={summaries === null}
-            onClick={() => void startNew()}
+            onClick={() => guard(() => void startNew())}
           >
             + New
           </Button>
@@ -318,7 +403,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                 aria-current={doc?.savedName === s.name}
                 disabled={s.error !== null}
                 title={s.error ?? undefined}
-                onClick={() => openLayout(s.name)}
+                onClick={() => guard(() => void openLayout(s.name))}
               >
                 {s.name}
               </button>
@@ -350,7 +435,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   ● Unsaved changes
                 </span>
               )}
-              <Button onClick={save} disabled={busy}>
+              <Button onClick={() => void save()} disabled={busy}>
                 Save
               </Button>
               <Button
@@ -364,7 +449,9 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
               <Button
                 variant="secondary"
                 disabled={busy || doc.savedName === null}
-                onClick={() => setDialog({ kind: 'duplicate', name: `${doc.draft.name} copy`.slice(0, 64), error: null })}
+                onClick={() =>
+                  guard(() => setDialog({ kind: 'duplicate', name: `${doc.draft.name} copy`.slice(0, 64), error: null }))
+                }
               >
                 Duplicate
               </Button>
@@ -457,6 +544,33 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
           </>
         )}
       </Card>
+
+      {pending && doc && (
+        <Dialog open title="Unsaved changes" onClose={() => !busy && setPending(null)}>
+          <p>{doc.draft.name} has unsaved changes.</p>
+          {pending.errors.length > 0 && (
+            <div className={styles.errors} role="alert" style={{ marginTop: 'var(--space-3)' }}>
+              <strong>Not saved:</strong>
+              <ul>
+                {pending.errors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className={styles.dialogActions}>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="danger" disabled={busy} onClick={discardThenContinue}>
+              Discard
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void saveThenContinue()}>
+              Save
+            </Button>
+          </div>
+        </Dialog>
+      )}
 
       {dialog && doc && (
         <Dialog open title={dialogTexts[dialog.kind].title(doc.draft.name)} onClose={() => !busy && setDialog(null)}>

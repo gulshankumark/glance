@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 export interface DialogProps {
   open: boolean;
@@ -8,12 +8,14 @@ export interface DialogProps {
 }
 
 export const Dialog: React.FC<DialogProps> = ({ open, title, children, onClose }) => {
+  const titleId = useId();
   if (!open) return null;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
       style={{
         position: 'fixed',
         inset: 0,
@@ -39,7 +41,7 @@ export const Dialog: React.FC<DialogProps> = ({ open, title, children, onClose }
           boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
         }}
       >
-        <h2 style={{ marginBottom: 'var(--space-4)', fontSize: '1.25rem' }}>{title}</h2>
+        <h2 id={titleId} style={{ marginBottom: 'var(--space-4)', fontSize: '1.25rem' }}>{title}</h2>
         {children}
       </div>
     </div>

@@ -367,6 +367,8 @@ test.describe('Layouts canvas (review fixes)', () => {
 
     api.layouts.set('New layout 2', { ...api.layouts.get('Gaming')!, name: 'New layout 2' });
     await page.getByRole('button', { name: '+ New' }).click();
+    // The open new layout was never saved, so starting another asks first (Task 6 unsaved guard).
+    await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard' }).click();
     await expect(page.getByTestId('layout-title')).toContainText('New layout 3');
   });
 
