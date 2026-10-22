@@ -74,3 +74,128 @@ export interface Settings {
   https: boolean;
   hasPassword: boolean;
 }
+
+// ---- Layout JSON (docs/api.md "Layout JSON"); sensor refs are sensor ids or "role:<role>" ----
+
+export interface FontSpec {
+  family: string;
+  size: number;
+  weight: number;
+}
+export type TextAlign = 'left' | 'center' | 'right';
+
+export type Background =
+  | { type: 'color'; color: string }
+  | { type: 'image'; assetId: string }
+  | { type: 'animation'; assetId: string };
+
+export interface Threshold {
+  from: number;
+  color: string;
+}
+
+interface ItemBase {
+  id: string;
+  x: number;
+  y: number;
+}
+export interface TextItem extends ItemBase {
+  type: 'text';
+  text: string;
+  font: FontSpec;
+  color: string;
+  align: TextAlign;
+}
+export interface SensorItem extends ItemBase {
+  type: 'sensor';
+  sensor: string;
+  label?: string | null;
+  showUnit: boolean;
+  decimals: number;
+  font: FontSpec;
+  color: string;
+  align: TextAlign;
+}
+export interface ClockItem extends ItemBase {
+  type: 'clock';
+  format?: string | null;
+  timeZone: string;
+  label?: string | null;
+  font: FontSpec;
+  color: string;
+  align: TextAlign;
+}
+export interface ImageItem extends ItemBase {
+  type: 'image';
+  assetId: string;
+  width: number;
+  height: number;
+}
+interface GaugeBase extends ItemBase {
+  sensor: string;
+  width: number;
+  height: number;
+  min?: number | null;
+  max?: number | null;
+  color: string;
+  trackColor: string;
+  thresholds: Threshold[];
+  showValue: boolean;
+  label?: string | null;
+  font: FontSpec;
+}
+export interface BarItem extends GaugeBase {
+  type: 'bar';
+  vertical: boolean;
+  rounded: boolean;
+}
+export interface SegmentedBarItem extends GaugeBase {
+  type: 'segmentedBar';
+  segments: number;
+  gap: number;
+  vertical: boolean;
+}
+export interface ArcGaugeItem extends GaugeBase {
+  type: 'arcGauge';
+  startAngle: number;
+  sweepAngle: number;
+  thickness: number;
+}
+export interface DialItem extends GaugeBase {
+  type: 'dial';
+  startAngle: number;
+  sweepAngle: number;
+  ticks: number;
+  needleColor: string;
+}
+export interface HistoryGraphItem extends GaugeBase {
+  type: 'historyGraph';
+  windowSeconds: number;
+  area: boolean;
+  grid: boolean;
+}
+export interface SparklineItem extends GaugeBase {
+  type: 'sparkline';
+  windowSeconds: number;
+}
+
+export type Item =
+  | TextItem
+  | SensorItem
+  | ClockItem
+  | ImageItem
+  | BarItem
+  | SegmentedBarItem
+  | ArcGaugeItem
+  | DialItem
+  | HistoryGraphItem
+  | SparklineItem;
+export type ItemType = Item['type'];
+
+export interface Layout {
+  name: string;
+  width: number;
+  height: number;
+  background: Background;
+  items: Item[];
+}
