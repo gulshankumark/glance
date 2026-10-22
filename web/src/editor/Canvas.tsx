@@ -69,7 +69,8 @@ function useRenderedDraft(layout: Layout): { rendered: Rendered | null; error: s
     schedulerRef.current = scheduler;
 
     const refresh = () => {
-      if (document.visibilityState === 'visible') scheduler.request(layoutRef.current);
+      // Never pre-empts: a render slower than the interval must still finish.
+      if (document.visibilityState === 'visible') scheduler.refresh(layoutRef.current);
     };
     const timer = setInterval(refresh, LIVE_REFRESH_MS);
     document.addEventListener('visibilitychange', refresh);

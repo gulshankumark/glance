@@ -152,3 +152,48 @@ describe('render scheduler', () => {
     expect(results).toEqual(['rb']);
   });
 });
+
+describe('render scheduler refresh (non-pre-empting)', () => {
+  it('starts a render at once when idle', async () => {
+    const { s, calls, results } = setup();
+    s.refresh('a');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.map((c) => c.arg)).toEqual(['a']);
+    calls[0].resolve('ra');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results).toEqual(['ra']);
+  });
+
+  it('never aborts a render in flight, however slow', async () => {
+    const { s, calls, results } = setup();
+    s.refresh('a');
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      s.refresh('a');
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].signal.aborted).toBe(false);
+    calls[0].resolve('ra');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results).toEqual(['ra']);
+  });
+
+  it('is ignored while a request is waiting for its debounce', async () => {
+    const { s, calls } = setup();
+    s.request('edit');
+    await vi.advanceTimersByTimeAsync(50);
+    s.refresh('old');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(calls.map((c) => c.arg)).toEqual(['edit']);
+  });
+
+  it('an edit still pre-empts a refresh render', async () => {
+    const { s, calls } = setup();
+    s.refresh('a');
+    await vi.advanceTimersByTimeAsync(0);
+    s.request('b');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(calls[0].signal.aborted).toBe(true);
+  });
+});
