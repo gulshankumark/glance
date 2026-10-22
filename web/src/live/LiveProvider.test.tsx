@@ -51,12 +51,7 @@ beforeEach(() => {
   authState = { loopback: true, authenticated: false, networkAccess: false };
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => authState,
-    })),
+    vi.fn(async () => new Response(JSON.stringify(authState), { headers: { 'content-type': 'application/json' } })),
   );
 });
 

@@ -68,11 +68,11 @@ async function handleResponse<T>(res: Response, options: ApiOptions = {}): Promi
     return undefined as unknown as T;
   }
 
+  // Some routes answer 200 with an empty body (e.g. PUT /api/layouts/{name}).
+  const text = await res.text();
+  if (!text) return undefined as unknown as T;
   const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    return (await res.json()) as T;
-  }
-  return (await res.text()) as unknown as T;
+  return (contentType.includes('application/json') ? JSON.parse(text) : text) as T;
 }
 
 export async function api<T>(method: string, path: string, body?: unknown, options?: ApiOptions): Promise<T> {

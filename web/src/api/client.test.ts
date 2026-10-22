@@ -49,12 +49,9 @@ describe('API client', () => {
   });
 
   it('api sends JSON content type', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ ok: true }),
-    } as Response);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } }),
+    );
     globalThis.fetch = fetchMock;
 
     await api('POST', '/api/settings', { unit: 'celsius' });
@@ -192,5 +189,19 @@ describe('api signal', () => {
     const ctrl = new AbortController();
     await api('POST', '/api/render/bounds', {}, { signal: ctrl.signal });
     expect(fetchMock).toHaveBeenCalledWith('/api/render/bounds', expect.objectContaining({ signal: ctrl.signal }));
+  });
+});
+
+describe('empty answers', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('a 200 with an empty JSON-typed body resolves to undefined', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    await expect(api('PUT', '/api/layouts/A', {})).resolves.toBeUndefined();
   });
 });
