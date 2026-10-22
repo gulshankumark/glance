@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { api, ApiError, getBlob, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
+import { api, ApiError, getBlob, postBlob, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
 
 describe('API client', () => {
   const originalFetch = globalThis.fetch;
@@ -142,5 +142,55 @@ describe('getBlob', () => {
 
     expect((err as ApiError).status).toBe(404);
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+});
+
+describe('postBlob', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('POSTs JSON with the abort signal and returns the body as a Blob', async () => {
+    const blob = new Blob(['jpeg']);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => blob } as Response);
+    globalThis.fetch = fetchMock;
+    const ctrl = new AbortController();
+
+    await expect(postBlob('/api/render', { name: 'A' }, { signal: ctrl.signal })).resolves.toBe(blob);
+    expect(fetchMock).toHaveBeenCalledWith('/api/render', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'A' }),
+      signal: ctrl.signal,
+    }));
+  });
+
+  it('throws ApiError with the server errors on 400', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ errors: ["item 'a': sensor is required"] }),
+    } as Response);
+
+    const err = await postBlob('/api/render', {}).catch((e: unknown) => e);
+    expect((err as ApiError).errors).toEqual(["item 'a': sensor is required"]);
+  });
+});
+
+describe('api signal', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('passes the abort signal to fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204, headers: new Headers() } as Response);
+    globalThis.fetch = fetchMock;
+    const ctrl = new AbortController();
+    await api('POST', '/api/render/bounds', {}, { signal: ctrl.signal });
+    expect(fetchMock).toHaveBeenCalledWith('/api/render/bounds', expect.objectContaining({ signal: ctrl.signal }));
   });
 });

@@ -15,6 +15,8 @@ type UnauthorizedHandler = (currentHash: string) => void;
 export interface ApiOptions {
   /** A 401 is the answer itself (e.g. a wrong password), not "log in first": do not redirect to the login page. */
   skipAuthRedirect?: boolean;
+  /** Aborts the request (fetch rejects with an AbortError). */
+  signal?: AbortSignal;
 }
 
 const defaultUnauthorizedHandler: UnauthorizedHandler = (currentHash: string) => {
@@ -86,6 +88,7 @@ export async function api<T>(method: string, path: string, body?: unknown, optio
     method,
     headers,
     body: bodyPayload,
+    signal: options?.signal,
   });
 
   return handleResponse<T>(res, options);
@@ -105,5 +108,17 @@ export async function getBlob(path: string): Promise<Blob> {
   const res = await fetch(path, { cache: 'no-store' });
   if (res.status === 401) notifyUnauthorized();
   if (!res.ok) throw new ApiError(res.status, [`Request failed with status ${res.status}`]);
+  return res.blob();
+}
+
+/** POST a JSON body and return the binary answer (e.g. POST /api/render's JPEG); errors as for api(). */
+export async function postBlob(path: string, body: unknown, options: ApiOptions = {}): Promise<Blob> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  if (!res.ok) return handleResponse<never>(res, options);
   return res.blob();
 }
