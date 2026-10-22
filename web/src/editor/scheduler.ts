@@ -26,7 +26,13 @@ export function createRenderScheduler<T, R>(
     const mySeq = seq;
     const ctrl = new AbortController();
     current = ctrl;
-    renderFn(latest.value, ctrl.signal)
+    let render: Promise<R>;
+    try {
+      render = renderFn(latest.value, ctrl.signal);
+    } catch (e) {
+      render = Promise.reject(e); // a synchronous throw must not leave `current` set forever
+    }
+    render
       .then(
         (r) => { if (!disposed && mySeq === seq) onResult(r); },
         (e) => { if (!disposed && mySeq === seq && !ctrl.signal.aborted) onError?.(e); },
@@ -42,6 +48,7 @@ export function createRenderScheduler<T, R>(
       if (disposed) return;
       latest = { value: t };
       seq++;
+      due = false; // a newer request restarts the debounce; a settling render must not start before it elapses
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (current) { due = true; current.abort(); } else start();

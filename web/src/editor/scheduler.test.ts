@@ -112,4 +112,43 @@ describe('render scheduler', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toHaveLength(1);
   });
+  it('keeps working after renderFn throws synchronously', async () => {
+    const onError = vi.fn();
+    const results: string[] = [];
+    let n = 0;
+    const s = createRenderScheduler<string, string>(
+      (arg) => {
+        if (n++ === 0) throw new Error('sync boom');
+        return Promise.resolve('r' + arg);
+      },
+      (r) => results.push(r),
+      { delayMs: 150, onError },
+    );
+    s.request('a');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(onError).toHaveBeenCalledTimes(1);
+    s.request('b');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(results).toEqual(['rb']);
+  });
+
+  it('restarts the debounce when a request arrives while an aborted render settles', async () => {
+    const { s, calls, results } = setup();
+    s.request('a');
+    await vi.advanceTimersByTimeAsync(150);
+    s.request('x');
+    await vi.advanceTimersByTimeAsync(150); // x due: a aborted, waiting for it to settle
+    s.request('b');
+    await vi.advanceTimersByTimeAsync(50);
+    calls[0].resolve('ra'); // a settles 50 ms into b's debounce
+    await vi.advanceTimersByTimeAsync(99);
+    expect(calls).toHaveLength(1); // nothing started before b's 150 ms
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls.map((c) => c.arg)).toEqual(['a', 'b']);
+    expect(calls[1].signal.aborted).toBe(false);
+    calls[1].resolve('rb');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls).toHaveLength(2);
+    expect(results).toEqual(['rb']);
+  });
 });
