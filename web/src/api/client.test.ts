@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { api, ApiError, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
+import { api, ApiError, getBlob, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
 
 describe('API client', () => {
   const originalFetch = globalThis.fetch;
@@ -115,5 +115,32 @@ describe('API client auth redirect', () => {
     await api('GET', '/api/sensors').catch(() => undefined);
 
     expect(window.location.hash).toBe('#login?return=%23sensors');
+  });
+});
+
+describe('getBlob', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    resetUnauthorizedHandler();
+  });
+
+  it('returns the body of a 200 as a Blob', async () => {
+    const blob = new Blob(['jpeg']);
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => blob } as Response);
+
+    await expect(getBlob('/api/preview/a.jpg')).resolves.toBe(blob);
+  });
+
+  it('throws ApiError with the status on 404 without redirecting', async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 } as Response);
+
+    const err = await getBlob('/api/preview/a.jpg').catch((e: unknown) => e);
+
+    expect((err as ApiError).status).toBe(404);
+    expect(onUnauthorized).not.toHaveBeenCalled();
   });
 });

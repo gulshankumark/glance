@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import { mockApi, seedDevice } from './mockApi';
 
@@ -8,125 +8,181 @@ test.beforeEach(async () => {
   }
 });
 
+const card = (page: Page) => page.getByTestId('device-card-thermalright-hid-5302_SER1');
+const preview = (page: Page) => card(page).getByTestId('device-preview');
+
+async function setVisibility(page: Page, state: 'hidden' | 'visible') {
+  await page.evaluate((s) => {
+    Object.defineProperty(document, 'visibilityState', { value: s, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+/** True once the preview <img> shows a decoded image. */
+const previewLoaded = (page: Page) =>
+  preview(page)
+    .evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)
+    .catch(() => false);
+
 test.describe('Display Tab', () => {
   test('shows device card with preview and fps', async ({ page }) => {
-    await mockApi(page);
+    const api = await mockApi(page);
     await page.goto('/#display');
 
-    const card = page.locator('[data-testid="device-card-thermalright-hid-5302_SER1"]');
-    await expect(card).toBeVisible();
+    await expect(card(page)).toBeVisible();
+    await expect(card(page)).toContainText('Thermalright 1280x480 LCD');
+    await expect(card(page)).toContainText('1280×480');
+    await expect(card(page)).toContainText('10.0 fps');
 
-    await expect(card).toContainText('Thermalright 1280x480 LCD');
-    await expect(card).toContainText('1280x480');
-    await expect(card).toContainText('10.0 fps');
-
-    // Live preview image exists
-    const preview = card.locator('img[data-testid="device-preview"]');
-    await expect(preview).toBeVisible();
-    await expect(preview).toHaveAttribute('src', /\/api\/preview\/thermalright-hid-5302_SER1\.jpg/);
+    await expect(preview(page)).toBeVisible();
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+    expect(api.calls.some((c) => c.path === '/api/preview/thermalright-hid-5302_SER1.jpg')).toBe(true);
   });
 
   test('changing layout PUTs activeLayout', async ({ page }) => {
     const api = await mockApi(page);
     await page.goto('/#display');
 
-    const select = page.locator('select[aria-label="Active Layout"]');
+    const select = page.getByLabel('Active layout');
     await expect(select).toBeVisible();
 
     await Promise.all([
-      page.waitForResponse(
-        (res) => res.url().includes('/api/devices') && res.request().method() === 'PUT'
-      ),
+      page.waitForResponse((res) => res.url().includes('/api/devices') && res.request().method() === 'PUT'),
       select.selectOption('Gaming'),
     ]);
 
-    const putCall = api.calls.find(
-      (c) => c.method === 'PUT' && c.path === '/api/devices/thermalright-hid-5302_SER1'
-    );
-    expect(putCall).toBeDefined();
-    expect(putCall?.body).toMatchObject({ activeLayout: 'Gaming' });
+    const putCall = api.calls.find((c) => c.method === 'PUT' && c.path === '/api/devices/thermalright-hid-5302_SER1');
+    expect(putCall?.body).toEqual({ activeLayout: 'Gaming' });
+    await expect(select).toHaveValue('Gaming');
   });
 
   test('Flip 180° PUTs rotation', async ({ page }) => {
     const api = await mockApi(page);
     await page.goto('/#display');
 
-    const flipBtn = page.locator('button:has-text("Flip 180°")');
-    await expect(flipBtn).toBeVisible();
-
     await Promise.all([
-      page.waitForResponse(
-        (res) => res.url().includes('/api/devices') && res.request().method() === 'PUT'
-      ),
-      flipBtn.click(),
+      page.waitForResponse((res) => res.url().includes('/api/devices') && res.request().method() === 'PUT'),
+      page.getByRole('button', { name: 'Flip 180°' }).click(),
     ]);
 
-    const putCall = api.calls.find(
-      (c) => c.method === 'PUT' && c.path === '/api/devices/thermalright-hid-5302_SER1'
-    );
-    expect(putCall).toBeDefined();
-    expect(putCall?.body).toMatchObject({ rotation: 180 });
+    const putCall = api.calls.find((c) => c.method === 'PUT' && c.path === '/api/devices/thermalright-hid-5302_SER1');
+    expect(putCall?.body).toEqual({ rotation: 180 });
+    await expect(page.getByRole('button', { name: '180°', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('preview refreshes about once a second while visible', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+
+    const before = api.previewRequests();
+    await page.waitForTimeout(3500);
+    const made = api.previewRequests() - before;
+    expect(made).toBeGreaterThanOrEqual(3);
+    expect(made).toBeLessThanOrEqual(4);
   });
 
   test('preview refresh pauses while hidden', async ({ page }) => {
-    await mockApi(page);
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+
+    await setVisibility(page, 'hidden');
+    // Let a request that was already in flight when the page was hidden finish before counting.
+    await page.waitForTimeout(300);
+    const whileHidden = api.previewRequests();
+    await page.waitForTimeout(2500);
+    expect(api.previewRequests()).toBe(whileHidden);
+
+    await setVisibility(page, 'visible');
+    await expect.poll(() => api.previewRequests(), { timeout: 1500 }).toBeGreaterThan(whileHidden);
+  });
+
+  test('device pushes do not speed up the preview refresh', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+
+    // Devices pushed every 200 ms for 3 s: still at most one preview request per second.
+    const before = api.previewRequests();
+    for (let i = 0; i < 15; i++) {
+      await api.sendEvent('devices', [seedDevice({ fps: 9 + (i % 3) * 0.5, framesSent: 1234 + i })]);
+      await page.waitForTimeout(200);
+    }
+    expect(api.previewRequests() - before).toBeLessThanOrEqual(4);
+  });
+
+  test('keeps the last preview image on 404', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    await expect.poll(() => previewLoaded(page)).toBe(true);
+    const shown = await preview(page).getAttribute('src');
+
+    api.options.previewStatus = 404;
+    const before = api.previewRequests();
+    await expect.poll(() => api.previewRequests(), { timeout: 4000 }).toBeGreaterThanOrEqual(before + 2);
+
+    expect(await preview(page).getAttribute('src')).toBe(shown);
+    expect(await previewLoaded(page)).toBe(true);
+  });
+
+  test('shows the message of a retrying or unsupported screen', async ({ page }) => {
+    await mockApi(page, {
+      devices: [
+        seedDevice({ status: 'retrying', message: 'the screen stopped answering', nextRetry: '2026-10-22T10:00:05Z', fps: 0 }),
+        seedDevice({
+          key: 'thermalright-hid-5302_SER2',
+          serial: 'SER2',
+          status: 'unsupported',
+          message: 'firmware 9 is not supported',
+          fps: 0,
+        }),
+      ],
+    });
     await page.goto('/#display');
 
-    // Initial load requested preview
-    const preview = page.locator('img[data-testid="device-preview"]');
-    await expect(preview).toBeVisible();
+    await expect(card(page)).toContainText('the screen stopped answering');
+    await expect(page.getByTestId('device-card-thermalright-hid-5302_SER2')).toContainText('firmware 9 is not supported');
+  });
 
-    // Hide page
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'hidden',
-        writable: true,
-      });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
+  test('fps is greyed after a reconnect until the next sensors event', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    const fps = card(page).getByText('10.0 fps');
+    await expect(fps).toBeVisible();
 
-    const srcBefore = await preview.getAttribute('src');
+    await api.sendEvent('sensors', { 'cpu/t': 55 });
+    await expect(fps).not.toHaveAttribute('aria-busy', 'true');
 
-    // Wait 1.5s
-    await page.waitForTimeout(1500);
+    await api.closeEvents();
+    await expect(fps).toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByTestId('reconnecting-banner')).toBeHidden({ timeout: 5000 });
+    await expect(fps).toHaveAttribute('aria-busy', 'true');
 
-    const srcAfterHidden = await preview.getAttribute('src');
-    expect(srcAfterHidden).toBe(srcBefore);
-
-    // Unhide page
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'visible',
-        writable: true,
-      });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-
-    // Wait 1.5s for refresh
-    await page.waitForTimeout(1500);
-    const srcAfterVisible = await preview.getAttribute('src');
-    expect(srcAfterVisible).not.toBe(srcBefore);
+    await api.sendEvent('sensors', { 'cpu/t': 56 });
+    await expect(fps).not.toHaveAttribute('aria-busy', 'true');
   });
 
   test('empty state without devices', async ({ page }) => {
     await mockApi(page, { devices: [] });
     await page.goto('/#display');
 
-    await expect(page.locator('main')).toContainText(
-      'No screen found — plug in a supported display'
-    );
+    await expect(page.locator('main')).toContainText('No screen found — plug in a supported display');
   });
 
-  test('first-run call to action without active layout', async ({ page }) => {
-    await mockApi(page, {
-      devices: [seedDevice({ activeLayout: null, fps: 0, framesSent: 0 })],
-    });
+  test('"Choose a layout" opens the Layouts tab', async ({ page }) => {
+    await mockApi(page, { devices: [seedDevice({ activeLayout: null, fps: 0, framesSent: 0 })] });
     await page.goto('/#display');
 
-    const cta = page.locator('a, button').filter({ hasText: /Choose a layout|Create a layout/ });
-    await expect(cta.first()).toBeVisible();
+    await page.getByRole('button', { name: 'Choose a layout' }).click();
+    await expect(page).toHaveURL(/#layouts$/);
+  });
 
-    await cta.first().click();
-    expect(page.url()).toContain('#layouts');
+  test('"Create a layout" starts a new layout', async ({ page }) => {
+    await mockApi(page, { devices: [seedDevice({ activeLayout: null, fps: 0, framesSent: 0 })] });
+    await page.goto('/#display');
+
+    await page.getByRole('button', { name: 'Create a layout' }).click();
+    await expect(page).toHaveURL(/#layouts\/new$/);
   });
 });

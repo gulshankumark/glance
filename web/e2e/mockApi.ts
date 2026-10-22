@@ -10,10 +10,14 @@ export interface MockApiOptions {
   layouts?: LayoutSummary[];
   /** The mock event stream fails (error instead of open) on every connection attempt. */
   eventsFail?: boolean;
+  /** HTTP status of GET /api/preview/{key}.jpg (default 200 with a tiny JPEG); may be changed while a test runs. */
+  previewStatus?: 200 | 404;
 }
 
 export interface MockApiHandle {
   calls: Array<{ method: string; path: string; body?: unknown }>;
+  /** Number of GET /api/preview requests so far. */
+  previewRequests: () => number;
   sendEvent: (event: string, data: unknown) => Promise<void>;
   closeEvents: () => Promise<void>;
   options: MockApiOptions;
@@ -196,6 +200,10 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     }
 
     if (path.startsWith('/api/preview/')) {
+      if (opts.previewStatus === 404) {
+        await route.fulfill({ status: 404, body: '' });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'image/jpeg',
@@ -303,6 +311,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
 
   return {
     calls,
+    previewRequests: () => calls.filter((c) => c.path.startsWith('/api/preview/')).length,
     options: opts,
     devices,
     sendEvent: async (event: string, data: unknown) => {

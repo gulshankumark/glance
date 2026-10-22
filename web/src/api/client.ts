@@ -99,3 +99,11 @@ export async function upload<T>(path: string, form: FormData): Promise<T> {
 
   return handleResponse<T>(res);
 }
+
+/** GET a binary resource (e.g. a preview JPEG) through the same 401 handling as api(); throws ApiError if not ok. */
+export async function getBlob(path: string): Promise<Blob> {
+  const res = await fetch(path, { cache: 'no-store' });
+  if (res.status === 401) notifyUnauthorized();
+  if (!res.ok) throw new ApiError(res.status, [`Request failed with status ${res.status}`]);
+  return res.blob();
+}
