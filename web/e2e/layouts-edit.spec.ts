@@ -292,3 +292,87 @@ test.describe('Layouts editing: properties and items', () => {
     await expect(page.locator('main b, main i, main img[src="x"]')).toHaveCount(0);
   });
 });
+
+test.describe('Layouts editing: background and import', () => {
+  const bg = (page: Page) => page.getByTestId('background-picker');
+
+  test('background picker sets colour, image and animation', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Gaming');
+
+    await bg(page).getByLabel('Background colour', { exact: true }).fill('#203040');
+    await bg(page).getByLabel('Background colour', { exact: true }).press('Enter');
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'color', color: '#203040' });
+
+    await bg(page).getByRole('radio', { name: 'Image' }).check();
+    await expect(bg(page).getByRole('button', { name: /Animation/ })).toHaveCount(0);
+    await bg(page).getByRole('button', { name: 'Image 1, 320×240' }).click();
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'image', assetId: 'img1' });
+    await expect(bg(page).getByRole('button', { name: 'Image 1, 320×240' })).toHaveAttribute('aria-pressed', 'true');
+
+    await bg(page).getByRole('radio', { name: 'Animation' }).check();
+    await bg(page).getByRole('button', { name: 'Animation 1, 320×240, 12 frames' }).click();
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'animation', assetId: 'anim1' });
+
+    // Back to a colour keeps the colour chosen before.
+    await bg(page).getByRole('radio', { name: 'Colour' }).check();
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'color', color: '#203040' });
+  });
+
+  test('zt import asks rotation and uploads multipart', async ({ page }) => {
+    const api = await mockApi(page);
+    await openLayout(page, 'Gaming');
+
+    await bg(page).getByRole('radio', { name: 'Animation' }).check();
+    await bg(page).getByLabel('File to import').setInputFiles({
+      name: 'theme.zt', mimeType: 'application/octet-stream', buffer: Buffer.from('zt-data'),
+    });
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('rotation the file was made for');
+    await expect(dialog.getByLabel('Rotation')).toHaveValue('0');
+    await dialog.getByLabel('Rotation').selectOption('90');
+    await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith('/api/assets') && r.request().method() === 'POST'),
+      dialog.getByRole('button', { name: 'Import' }).click(),
+    ]);
+
+    expect(api.uploads).toHaveLength(1);
+    expect(api.uploads[0]).toMatchObject({ fileName: 'theme.zt', kind: 'zt', ztRotation: '90' });
+    expect(api.uploads[0].contentType).toMatch(/^multipart\/form-data; boundary=/);
+    // The imported animation becomes the background.
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'animation', assetId: 'up1' });
+    await expect(bg(page).getByRole('button', { name: 'Animation 2, 320×240, 30 frames' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('image import takes the kind from the extension and shows a too-large error', async ({ page }) => {
+    const api = await mockApi(page, { assetUploadStatus: 413 });
+    await openLayout(page, 'Gaming');
+
+    await bg(page).getByRole('radio', { name: 'Image' }).check();
+    await bg(page).getByLabel('File to import').setInputFiles({
+      name: 'photo.JPG', mimeType: 'image/jpeg', buffer: Buffer.from('jpeg'),
+    });
+    await expect(bg(page).getByRole('alert')).toHaveText('File is too large (max 64 MB).');
+    expect(api.uploads[0]).toMatchObject({ fileName: 'photo.JPG', kind: 'image', ztRotation: null });
+
+    api.options.assetUploadStatus = undefined;
+    await bg(page).getByLabel('File to import').setInputFiles({
+      name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('png'),
+    });
+    await expect.poll(() => lastRender(api)?.background).toEqual({ type: 'image', assetId: 'up2' });
+    await expect(bg(page).getByRole('alert')).toHaveCount(0);
+  });
+});
+
+test('the image picker imports an image that can then be picked', async ({ page }) => {
+  const api = await mockApi(page);
+  await openLayout(page, 'Gaming');
+
+  await page.getByTestId('add-menu').getByRole('button', { name: '+ Image' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('File to import').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+  await dialog.getByRole('button', { name: 'Image 2, 320×240' }).click();
+  await expect.poll(() => lastRender(api)?.items.at(-1)).toMatchObject({ type: 'image', assetId: 'up1' });
+  expect(api.uploads[0]).toMatchObject({ kind: 'image', fileName: 'logo.png' });
+});

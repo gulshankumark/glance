@@ -94,13 +94,28 @@ export async function api<T>(method: string, path: string, body?: unknown, optio
   return handleResponse<T>(res, options);
 }
 
-export async function upload<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    body: form,
+/**
+ * POST a multipart/form-data body (the browser sets the boundary). Uses XMLHttpRequest because fetch cannot report
+ * upload progress; `onProgress` receives the fraction sent (0..1). Answers and errors are handled as for api().
+ */
+export function upload<T>(path: string, form: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      const empty = xhr.status === 204 || xhr.status === 205 || xhr.status === 304;
+      const res = new Response(empty ? null : xhr.responseText, {
+        status: xhr.status,
+        headers: { 'content-type': xhr.getResponseHeader('content-type') ?? '' },
+      });
+      handleResponse<T>(res).then(resolve, reject);
+    };
+    xhr.onerror = () => reject(new TypeError('Network request failed'));
+    xhr.send(form);
   });
-
-  return handleResponse<T>(res);
 }
 
 /** GET a binary resource (e.g. a preview JPEG) through the same 401 handling as api(); throws ApiError if not ok. */

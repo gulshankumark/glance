@@ -23,6 +23,16 @@ export interface MockApiOptions {
   sensors?: SensorsResponse;
   /** Stored assets (default: seedAssets()). */
   assets?: Asset[];
+  /** While set, POST /api/assets answers this status with {error}; may be changed while a test runs. */
+  assetUploadStatus?: 400 | 413;
+}
+
+/** A POST /api/assets request as the mock received it. */
+export interface AssetUpload {
+  contentType: string;
+  fileName: string | null;
+  kind: string | null;
+  ztRotation: string | null;
 }
 
 export interface MockApiHandle {
@@ -39,6 +49,8 @@ export interface MockApiHandle {
   renders: () => Layout[];
   /** The stored assets (uploads are appended). */
   assets: Asset[];
+  /** Every POST /api/assets so far. */
+  uploads: AssetUpload[];
   /** The highest number of POST /api/render fetches the page had pending (not answered, not aborted) at once. */
   maxRendersInFlight: () => Promise<number>;
 }
@@ -148,6 +160,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const renders: Layout[] = [];
   const assets: Asset[] = options.assets ? [...options.assets] : seedAssets();
+  const uploads: AssetUpload[] = [];
 
   const defaultSensors: SensorsResponse = options.sensors ?? {
     sensors: [
@@ -457,6 +470,29 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path === '/api/assets' && method === 'POST') {
+      const raw = req.postDataBuffer()?.toString('latin1') ?? '';
+      const part = (name: string) => new RegExp(`name="${name}"\r\n\r\n([^\r]*)`).exec(raw)?.[1] ?? null;
+      const upload: AssetUpload = {
+        contentType: req.headers()['content-type'] ?? '',
+        fileName: /name="file"; filename="([^"]*)"/.exec(raw)?.[1] ?? null,
+        kind: part('kind'),
+        ztRotation: part('ztRotation'),
+      };
+      uploads.push(upload);
+      const status = opts.assetUploadStatus;
+      if (status) {
+        const error = status === 413 ? 'file is too large' : 'invalid media';
+        await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error }) });
+        return;
+      }
+      const kind = (upload.kind ?? 'image') as Asset['kind'];
+      const asset: Asset = { id: `up${uploads.length}`, kind, width: 320, height: 240, frameCount: kind === 'image' ? 1 : 30 };
+      assets.push(asset);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(asset) });
+      return;
+    }
+
     const thumbMatch = /^\/api\/assets\/([^/]+)\/thumbnail\.jpg$/.exec(path);
     if (thumbMatch && method === 'GET') {
       const known = assets.some((a) => a.id === decodeURIComponent(thumbMatch[1]));
@@ -487,6 +523,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     devices,
     layouts,
     assets,
+    uploads,
     renders: () => [...renders],
     maxRendersInFlight: () =>
       page.evaluate(() => (window as unknown as { __maxRendersInFlight: number }).__maxRendersInFlight),

@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import type { DeviceView, Item, Layout, LayoutSummary } from '../api/types';
 import { AddMenu } from '../editor/AddMenu';
+import { IMAGE_KINDS } from '../editor/assets';
+import { AssetImport } from '../editor/AssetImport';
+import { BackgroundPicker } from '../editor/BackgroundPicker';
 import { Canvas } from '../editor/Canvas';
 import editorStyles from '../editor/Editor.module.css';
 import { describeItem } from '../editor/catalog';
@@ -177,6 +180,9 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     setDoc({ ...doc, draft });
     setSelectedId(draft.items[draft.items.length - 1].id);
   };
+
+  // In the image pickers: imported images join the list, where they can be picked.
+  const imageImport = <AssetImport kinds={IMAGE_KINDS} reloadAssets={editorData.reloadAssets} onImported={() => undefined} />;
 
   const selected = doc?.draft.items.find((i) => i.id === selectedId) ?? null;
 
@@ -391,7 +397,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
               </Banner>
             )}
 
-            <AddMenu layout={doc.draft} catalog={catalog} assets={assets} onInsert={insert} />
+            <AddMenu layout={doc.draft} catalog={catalog} assets={assets} onInsert={insert} imageImport={imageImport} />
 
             <Canvas
               key={openCount}
@@ -423,6 +429,15 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                     setDoc({ ...doc, draft: removeItem(doc.draft, id) });
                   }}
                 />
+                <h3 className={editorStyles.panelTitle} style={{ marginTop: 'var(--space-4)' }}>
+                  Background
+                </h3>
+                <BackgroundPicker
+                  key={openCount}
+                  background={doc.draft.background}
+                  data={editorData}
+                  onChange={(background) => setDoc((d) => d && { ...d, draft: { ...d.draft, background } })}
+                />
               </section>
               <section className={editorStyles.panel} aria-label="Properties">
                 <h3 className={editorStyles.panelTitle}>Properties</h3>
@@ -431,6 +446,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                     key={selected.id}
                     item={selected}
                     data={editorData}
+                    imageImport={imageImport}
                     onChange={(patch) => setDoc((d) => d && { ...d, draft: updateItem(d.draft, selected.id, patch) })}
                   />
                 ) : (

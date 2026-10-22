@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getBlob } from '../api/client';
+import { ApiError, getBlob } from '../api/client';
 import type { Asset } from '../api/types';
 import styles from './Editor.module.css';
 
@@ -7,6 +7,21 @@ import styles from './Editor.module.css';
 export const IMAGE_KINDS: ReadonlyArray<Asset['kind']> = ['image'];
 /** Assets an animation background can play. */
 export const ANIMATION_KINDS: ReadonlyArray<Asset['kind']> = ['gif', 'zt'];
+
+/** The asset kind a file is imported as, from its extension; null for files that cannot be imported. */
+export function kindFromFileName(name: string): Asset['kind'] | null {
+  const ext = /\.([^.]+)$/.exec(name)?.[1].toLowerCase();
+  if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return 'image';
+  if (ext === 'gif') return 'gif';
+  if (ext === 'zt') return 'zt';
+  return null;
+}
+
+/** What to tell the user when POST /api/assets failed. */
+export function importErrorText(e: unknown): string {
+  if (e instanceof ApiError) return e.status === 413 ? 'File is too large (max 64 MB).' : e.errors.join('; ');
+  return 'The file could not be uploaded.';
+}
 
 /** "Image 2, 320×240" / "Animation 1, 320×240, 12 frames" (n counts within the shown list, from 1). */
 export function assetLabel(asset: Asset, n: number): string {

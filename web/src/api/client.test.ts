@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { api, ApiError, getBlob, postBlob, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
+import { api, ApiError, getBlob, postBlob, resetUnauthorizedHandler, setUnauthorizedHandler, upload } from './client';
 
 describe('API client', () => {
   const originalFetch = globalThis.fetch;
@@ -203,5 +203,70 @@ describe('empty answers', () => {
       new Response('', { status: 200, headers: { 'content-type': 'application/json' } }),
     );
     await expect(api('PUT', '/api/layouts/A', {})).resolves.toBeUndefined();
+  });
+});
+
+describe('upload with progress', () => {
+  const OriginalXhr = globalThis.XMLHttpRequest;
+  afterEach(() => {
+    globalThis.XMLHttpRequest = OriginalXhr;
+    resetUnauthorizedHandler();
+  });
+
+  /** A fake XMLHttpRequest answering `status` with a JSON `body` after reporting half the upload. */
+  function fakeXhr(status: number, body: unknown) {
+    const sent: Array<{ method: string; url: string; body: unknown }> = [];
+    class FakeXhr {
+      status = 0;
+      responseText = '';
+      upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = {
+        onprogress: null,
+      };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      private method = '';
+      private url = '';
+      open(method: string, url: string) {
+        this.method = method;
+        this.url = url;
+      }
+      getResponseHeader(name: string) {
+        return name.toLowerCase() === 'content-type' ? 'application/json' : null;
+      }
+      send(data: unknown) {
+        sent.push({ method: this.method, url: this.url, body: data });
+        this.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 });
+        this.status = status;
+        this.responseText = JSON.stringify(body);
+        setTimeout(() => this.onload?.(), 0);
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    return sent;
+  }
+
+  it('posts the form, reports progress and resolves to the JSON answer', async () => {
+    const sent = fakeXhr(200, { id: 'a1', kind: 'zt', width: 1, height: 1, frameCount: 3 });
+    const form = new FormData();
+    const progress = vi.fn();
+    await expect(upload('/api/assets', form, progress)).resolves.toMatchObject({ id: 'a1' });
+    expect(sent).toEqual([{ method: 'POST', url: '/api/assets', body: form }]);
+    expect(progress).toHaveBeenCalledWith(0.5);
+  });
+
+  it('rejects with the status and error of a failed upload', async () => {
+    fakeXhr(413, { error: 'file is too large' });
+    const err = await upload('/api/assets', new FormData(), () => {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(413);
+    expect((err as ApiError).errors).toEqual(['file is too large']);
+  });
+
+  it('sends a 401 to the login page', async () => {
+    fakeXhr(401, { error: 'login required' });
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    await upload('/api/assets', new FormData(), () => {}).catch(() => undefined);
+    expect(handler).toHaveBeenCalled();
   });
 });
