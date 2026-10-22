@@ -64,13 +64,45 @@ test.describe('App Shell', () => {
 
     await page.goto('/#login?return=%23sensors');
 
-    await page.fill('input[type="password"]', 'mypassword');
+    await page.getByLabel('Password').fill('mypassword');
     await page.click('button[type="submit"]');
 
     await expect(page).toHaveURL(/#sensors$/);
     const loginCall = api.calls.find((c) => c.path === '/api/auth/login');
     expect(loginCall).toBeDefined();
     expect(loginCall?.body).toEqual({ password: 'mypassword' });
+  });
+
+  test('wrong password shows the message and keeps the return hash', async ({ page }) => {
+    await mockApi(page, {
+      loopback: false,
+      networkAccess: true,
+      authenticated: false,
+      password: 'mypassword',
+    });
+
+    await page.goto('/#login?return=%23sensors');
+
+    await page.getByLabel('Password').fill('nope');
+    await page.click('button[type="submit"]');
+
+    await expect(page.getByRole('alert')).toHaveText('wrong password');
+    await expect(page).toHaveURL(/#login\?return=%23sensors$/);
+
+    await page.getByLabel('Password').fill('mypassword');
+    await page.click('button[type="submit"]');
+
+    await expect(page).toHaveURL(/#sensors$/);
+  });
+
+  test('login ignores a return value that is not an app hash', async ({ page }) => {
+    await mockApi(page, { loopback: false, networkAccess: true, authenticated: false, password: 'mypassword' });
+
+    await page.goto('/#login?return=%23login%3Freturn%3D%2523sensors');
+    await page.getByLabel('Password').fill('mypassword');
+    await page.click('button[type="submit"]');
+
+    await expect(page).toHaveURL(/#display$/);
   });
 
   test('reconnecting banner shows when events drop and hides after reconnect', async ({ page }) => {

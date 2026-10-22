@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { api, ApiError, setUnauthorizedHandler } from './client';
+import { api, ApiError, resetUnauthorizedHandler, setUnauthorizedHandler } from './client';
 
 describe('API client', () => {
   const originalFetch = globalThis.fetch;
@@ -66,5 +66,54 @@ describe('API client', () => {
       }),
       body: JSON.stringify({ unit: 'celsius' }),
     }));
+  });
+});
+
+describe('API client auth redirect', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    resetUnauthorizedHandler();
+  });
+
+  const respond401 = (error: string) =>
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error }),
+    } as Response);
+
+  it('skipAuthRedirect keeps a 401 out of the unauthorized handler', async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    globalThis.fetch = respond401('wrong password');
+
+    const err = await api('POST', '/api/auth/login', { password: 'x' }, { skipAuthRedirect: true }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).errors).toEqual(['wrong password']);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('default handler sends the user to login with the encoded current hash', async () => {
+    window.location.hash = '#sensors';
+    globalThis.fetch = respond401('login required');
+
+    await api('GET', '/api/sensors').catch(() => undefined);
+
+    expect(window.location.hash).toBe('#login?return=%23sensors');
+  });
+
+  it('default handler never nests the login page inside its own return', async () => {
+    window.location.hash = '#login?return=%23sensors';
+    globalThis.fetch = respond401('login required');
+
+    await api('GET', '/api/sensors').catch(() => undefined);
+
+    expect(window.location.hash).toBe('#login?return=%23sensors');
   });
 });

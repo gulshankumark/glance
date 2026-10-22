@@ -3,24 +3,12 @@ import { api, ApiError } from '../api/client';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Field } from '../ui/Field';
+import { returnHashFrom } from './returnHash';
 
 export const LoginPage: React.FC<{ navigate: (hash: string) => void }> = ({ navigate }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const getReturnHash = () => {
-    const hash = window.location.hash;
-    const queryIdx = hash.indexOf('?');
-    if (queryIdx !== -1) {
-      const search = new URLSearchParams(hash.slice(queryIdx));
-      const returnUrl = search.get('return');
-      if (returnUrl) {
-        return decodeURIComponent(returnUrl);
-      }
-    }
-    return '#display';
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,8 +16,8 @@ export const LoginPage: React.FC<{ navigate: (hash: string) => void }> = ({ navi
     setLoading(true);
 
     try {
-      await api('POST', '/api/auth/login', { password });
-      navigate(getReturnHash());
+      await api('POST', '/api/auth/login', { password }, { skipAuthRedirect: true });
+      navigate(returnHashFrom(window.location.hash));
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.errors.join(', ') || 'Login failed');

@@ -12,8 +12,15 @@ export class ApiError extends Error {
 
 type UnauthorizedHandler = (currentHash: string) => void;
 
-let defaultUnauthorizedHandler: UnauthorizedHandler = (currentHash: string) => {
+export interface ApiOptions {
+  /** A 401 is the answer itself (e.g. a wrong password), not "log in first": do not redirect to the login page. */
+  skipAuthRedirect?: boolean;
+}
+
+const defaultUnauthorizedHandler: UnauthorizedHandler = (currentHash: string) => {
   const current = currentHash.startsWith('#') ? currentHash : `#${currentHash}`;
+  // Already on the login page: stay there instead of nesting it inside its own return value.
+  if (current.startsWith('#login')) return;
   window.location.hash = `#login?return=${encodeURIComponent(current)}`;
 };
 
@@ -27,10 +34,14 @@ export function resetUnauthorizedHandler(): void {
   unauthorizedHandler = defaultUnauthorizedHandler;
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (res.status === 401) {
-    const currentHash = window.location.hash || '#display';
-    unauthorizedHandler(currentHash);
+/** Sends the user to the login page (via the unauthorized handler), remembering the current hash. */
+export function notifyUnauthorized(): void {
+  unauthorizedHandler(window.location.hash || '#display');
+}
+
+async function handleResponse<T>(res: Response, options: ApiOptions = {}): Promise<T> {
+  if (res.status === 401 && !options.skipAuthRedirect) {
+    notifyUnauthorized();
   }
 
   if (!res.ok) {
@@ -62,7 +73,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (await res.text()) as unknown as T;
 }
 
-export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function api<T>(method: string, path: string, body?: unknown, options?: ApiOptions): Promise<T> {
   const headers: Record<string, string> = {};
   let bodyPayload: BodyInit | undefined;
 
@@ -77,7 +88,7 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     body: bodyPayload,
   });
 
-  return handleResponse<T>(res);
+  return handleResponse<T>(res, options);
 }
 
 export async function upload<T>(path: string, form: FormData): Promise<T> {
