@@ -46,7 +46,7 @@ const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
 
   let currentTab: React.ReactNode;
   if (baseRoute.startsWith('#layouts')) {
-    currentTab = <LayoutsTab navigate={navigate} />;
+    currentTab = <LayoutsTab navigate={navigate} route={baseRoute} />;
   } else if (baseRoute === '#sensors') {
     currentTab = <SensorsTab navigate={navigate} />;
   } else if (baseRoute === '#devices') {
