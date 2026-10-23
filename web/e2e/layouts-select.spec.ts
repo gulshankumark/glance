@@ -10,6 +10,8 @@ const inList = (page: Page, name: RegExp) => page.getByRole('list', { name: 'Ite
 const TITLE = /^Text — Glance/;
 const CPU = /^Sensor —/;
 const BAR = /^Bar —/;
+/** Pressed (selected) boxes on the canvas. */
+const pressed = (page: Page) => canvas(page).getByRole('button', { pressed: true });
 const properties = (page: Page) => page.getByRole('region', { name: 'Properties' });
 const unsaved = (page: Page) => page.getByTestId('unsaved-marker');
 const lastRender = (api: MockApiHandle): Layout | undefined => api.renders().at(-1);
@@ -99,13 +101,17 @@ test.describe('Layouts: multi-selection', () => {
     await expect.poll(() => lastRender(api)?.items.length).toBe(5);
     const copies = lastRender(api)!.items.slice(3);
     expect(copies.map((i) => [i.type, i.x, i.y])).toEqual([['text', 57, 56], ['sensor', 57, 216]]);
-    for (const c of copies) await expect(page.getByTestId(`item-box-${c.id}`)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('item-box-title')).toHaveAttribute('aria-pressed', 'false');
+    // Copies share their originals' names and come after them: the second of each pair is the pressed copy.
+    await expect(pressed(page)).toHaveCount(2);
+    for (const n of [TITLE, CPU]) {
+      await expect(onCanvas(page, n).nth(0)).toHaveAttribute('aria-pressed', 'false');
+      await expect(onCanvas(page, n).nth(1)).toHaveAttribute('aria-pressed', 'true');
+    }
 
     await page.keyboard.press('Delete');
     await expect.poll(() => lastRender(api)?.items.length).toBe(3);
-    for (const c of copies) await expect(page.getByTestId(`item-box-${c.id}`)).toHaveCount(0);
-    await expect(canvas(page).locator('[aria-pressed="true"]')).toHaveCount(0);
+    for (const n of [TITLE, CPU]) await expect(onCanvas(page, n)).toHaveCount(1);
+    await expect(pressed(page)).toHaveCount(0);
     await expect(properties(page)).toContainText('Select an item');
   });
 
@@ -119,30 +125,104 @@ test.describe('Layouts: multi-selection', () => {
     await expect(properties(page)).toContainText('3 items selected');
 
     await page.keyboard.press('Escape');
-    await expect(canvas(page).locator('[aria-pressed="true"]')).toHaveCount(0);
+    await expect(pressed(page)).toHaveCount(0);
   });
 
-  test('a group delete is one draft change and one render', async ({ page }) => {
+  test('a group delete never renders a half-removed draft', async ({ page }) => {
+    // That it is one draft change is checked at component level (CanvasGroup.test.tsx).
     const api = await mockApi(page);
     await openDefault(page);
-    await expect.poll(() => api.renders().length).toBeGreaterThan(0);
     await selectTwo(page);
     await expect(unsaved(page)).toBeHidden();
 
-    // A hidden page makes no live refreshes, so every render from here on comes from a draft change.
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-    await page.waitForTimeout(1200);
-    const before = api.renders().length;
     await page.keyboard.press('Delete');
     await expect(unsaved(page)).toBeVisible();
-    await expect.poll(() => api.renders().length).toBeGreaterThan(before);
-    await page.waitForTimeout(600);
+    await expect.poll(() => lastRender(api)?.items.map((i) => i.id)).toEqual(['bar1']);
+    const halfRemoved = (ids: string) => ids === 'cpu,bar1' || ids === 'title,bar1';
+    expect(api.renders().some((l) => halfRemoved(l.items.map((i) => i.id).join()))).toBe(false);
+  });
 
-    // Exactly one render, of the draft with both items gone (never one with only one of them removed).
-    const after = api.renders().slice(before);
-    expect(after.map((l) => l.items.map((i) => i.id))).toEqual([['bar1']]);
+  test('Ctrl/Shift press-and-drag on a selected box deselects it and moves nothing', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+
+    const b = (await onCanvas(page, CPU).boundingBox())!;
+    const start = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    for (const key of ['Control', 'Shift']) {
+      if (key === 'Shift') await onCanvas(page, CPU).click({ modifiers: ['Shift'] }); // back in the selection
+      await page.keyboard.down(key);
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(start.x + 60, start.y + 30, { steps: 5 });
+      await page.mouse.up();
+      await page.keyboard.up(key);
+      await expect(onCanvas(page, CPU)).toHaveAttribute('aria-pressed', 'false');
+      await expect(onCanvas(page, TITLE)).toHaveAttribute('aria-pressed', 'true');
+    }
+    await expect(unsaved(page)).toBeHidden();
+    expect(api.renders().every((l) => xOf(l, 'cpu') === 40 && xOf(l, 'title') === 40)).toBe(true);
+  });
+
+  test('a plain click on a selected box narrows the selection; a drag keeps the group', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+
+    const b = (await onCanvas(page, CPU).boundingBox())!;
+    const start = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 30, start.y, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => xOf(lastRender(api), 'title')).toBeGreaterThan(40);
+    await expect(pressed(page)).toHaveCount(2);
+
+    await onCanvas(page, CPU).click();
+    await expect(pressed(page)).toHaveCount(1);
+    await expect(onCanvas(page, CPU)).toHaveAttribute('aria-pressed', 'true');
+    await expect(properties(page)).not.toContainText('items selected');
+  });
+
+  test('Items list: Delete removes the whole selection when the item is part of it', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+
+    await inList(page, TITLE).focus();
+    await page.keyboard.press('Delete');
+    await expect.poll(() => lastRender(api)?.items.map((i) => i.id)).toEqual(['bar1']);
+    await expect(pressed(page)).toHaveCount(0);
+  });
+
+  test('Items list: Delete on an item outside the selection removes only that item', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+    await inList(page, BAR).focus();
+    await page.keyboard.press('Delete');
+    await expect.poll(() => lastRender(api)?.items.map((i) => i.id)).toEqual(['title', 'cpu']);
+    await expect(pressed(page)).toHaveCount(2);
+  });
+
+  test('Items list: Shift+Space and Ctrl+Space toggle, Space alone selects only that item', async ({ page }) => {
+    await mockApi(page);
+    await openDefault(page);
+
+    await inList(page, TITLE).focus();
+    await page.keyboard.press('Space');
+    await inList(page, CPU).focus();
+    await page.keyboard.press('Shift+Space');
+    await expect(pressed(page)).toHaveCount(2);
+    await inList(page, BAR).focus();
+    await page.keyboard.press('Control+Space');
+    await expect(pressed(page)).toHaveCount(3);
+    await page.keyboard.press('Control+Space');
+    await expect(inList(page, BAR)).toHaveAttribute('aria-pressed', 'false');
+    await expect(pressed(page)).toHaveCount(2);
+
+    await page.keyboard.press('Space');
+    await expect(pressed(page)).toHaveCount(1);
+    await expect(onCanvas(page, BAR)).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -137,6 +137,8 @@ interface Drag {
   start: { x: number; y: number };
   /** Positions of every dragged (selected) item when the drag started. */
   origins: Record<string, { x: number; y: number }>;
+  /** A plain press on an item of a multi-selection: released without moving, it narrows the selection to it. */
+  narrowTo: string | null;
 }
 
 /**
@@ -163,6 +165,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     stageRef.current?.focus({ preventScroll: true });
     const was = selectedIds.includes(item.id);
     let ids: string[];
+    let narrowTo: string | null = null;
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       ids = was ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id];
       onSelect(ids);
@@ -172,11 +175,12 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
       onSelect(ids);
     } else {
       ids = [...selectedIds];
+      narrowTo = ids.length > 1 ? item.id : null;
     }
     const origins: Drag['origins'] = {};
     for (const i of layoutRef.current.items) if (ids.includes(i.id)) origins[i.id] = { x: i.x, y: i.y };
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { pointerId: e.pointerId, start: pointAt(e), origins };
+    dragRef.current = { pointerId: e.pointerId, start: pointAt(e), origins, narrowTo };
   };
 
   const onBoxPointerMove = (e: React.PointerEvent) => {
@@ -185,6 +189,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     const p = pointAt(e);
     const dx = Math.round(p.x - drag.start.x);
     const dy = Math.round(p.y - drag.start.y);
+    if (dx !== 0 || dy !== 0) drag.narrowTo = null;
     // Every dragged item lands at its own origin + the same delta, whatever moves were applied before.
     const moves: Record<string, { dx: number; dy: number }> = {};
     for (const i of layoutRef.current.items) {
@@ -196,7 +201,10 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
   };
 
   const endDrag = (e: React.PointerEvent) => {
-    if (dragRef.current?.pointerId === e.pointerId) dragRef.current = null;
+    const drag = dragRef.current;
+    if (drag?.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    if (e.type === 'pointerup' && drag.narrowTo) onSelect([drag.narrowTo]);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -265,7 +273,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
   return (
     <div>
       <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
-        Click or tap an item to select it, drag to move. Shift+click adds to the selection. Keys: Arrows move 1 px,
+        Click or tap an item to select it, drag to move. Shift+click (Shift+Space in the Items list) adds to the selection. Keys: Arrows move 1 px,
         Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears.
       </p>
       <div

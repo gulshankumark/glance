@@ -8,15 +8,18 @@ export interface ItemListProps {
   catalog: SensorsResponse | null;
   selectedIds: readonly string[];
   onSelect: (ids: string[]) => void;
-  onRemove: (id: string) => void;
+  /** Removes these items (the whole selection when the focused item is part of a multi-selection). */
+  onRemove: (ids: string[]) => void;
 }
 
 /**
  * The layout's items, topmost last (as drawn): the keyboard way to reach them. Enter or Space selects an item on the
- * canvas (where arrows then nudge it), Delete removes it. Shift/Ctrl/Cmd+click adds it to or takes it out of the
- * selection.
+ * canvas (where arrows then nudge it), Delete removes it (or the whole selection it is part of). Shift/Ctrl/Cmd+click
+ * or Shift/Ctrl/Cmd+Space adds it to or takes it out of the selection.
  */
 export const ItemList: React.FC<ItemListProps> = ({ items, catalog, selectedIds, onSelect, onRemove }) => {
+  const toggle = (id: string) =>
+    onSelect(selectedIds.includes(id) ? selectedIds.filter((i) => i !== id) : [...selectedIds, id]);
   if (items.length === 0) return <p className={styles.muted}>No items yet — add one above or drag a sensor.</p>;
   return (
     <ul aria-label="Items" className={styles.leaves}>
@@ -29,15 +32,15 @@ export const ItemList: React.FC<ItemListProps> = ({ items, catalog, selectedIds,
               className={styles.leaf}
               aria-label={name}
               aria-pressed={selectedIds.includes(item.id)}
-              onClick={(e) => {
-                if (!(e.shiftKey || e.ctrlKey || e.metaKey)) onSelect([item.id]);
-                else if (selectedIds.includes(item.id)) onSelect(selectedIds.filter((id) => id !== item.id));
-                else onSelect([...selectedIds, item.id]);
-              }}
+              onClick={(e) => (e.shiftKey || e.ctrlKey || e.metaKey ? toggle(item.id) : onSelect([item.id]))}
               onKeyDown={(e) => {
                 if (e.key === 'Delete' || e.key === 'Backspace') {
                   e.preventDefault();
-                  onRemove(item.id);
+                  const inGroup = selectedIds.length > 1 && selectedIds.includes(item.id);
+                  onRemove(inGroup ? [...selectedIds] : [item.id]);
+                } else if (e.key === ' ' && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+                  e.preventDefault(); // no click on key up
+                  toggle(item.id);
                 }
               }}
             >

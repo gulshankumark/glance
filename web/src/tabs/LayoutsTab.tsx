@@ -9,7 +9,7 @@ import { Canvas } from '../editor/Canvas';
 import editorStyles from '../editor/Editor.module.css';
 import { describeItem } from '../editor/catalog';
 import { ItemList } from '../editor/ItemList';
-import { addItem, newLayout, removeItem, sensorItem, updateItem } from '../editor/model';
+import { addItem, newLayout, removeItems, sensorItem, updateItem } from '../editor/model';
 import { Properties } from '../editor/Properties';
 import { SensorTree } from '../editor/SensorTree';
 import { clearStash, readStash, writeStash } from '../editor/draftStash';
@@ -551,9 +551,9 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   catalog={catalog}
                   selectedIds={selectedIds}
                   onSelect={setSelectedIds}
-                  onRemove={(id) => {
-                    setSelectedIds((ids) => ids.filter((i) => i !== id));
-                    setDoc((d) => d && { ...d, draft: removeItem(d.draft, id) });
+                  onRemove={(ids) => {
+                    setSelectedIds((sel) => sel.filter((i) => !ids.includes(i)));
+                    setDoc((d) => d && { ...d, draft: removeItems(d.draft, ids) });
                   }}
                 />
                 <h3 className={editorStyles.panelTitle} style={{ marginTop: 'var(--space-4)' }}>
