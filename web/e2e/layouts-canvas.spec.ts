@@ -384,3 +384,28 @@ test.describe('Layouts canvas (review fixes)', () => {
     await expect(page.getByTestId('layout-title')).toContainText('1280×480');
   });
 });
+
+test.describe('Canvas on phones', () => {
+  test('every selection box is at least 44×44 CSS px at 360 px', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await mockApi(page);
+    await openLayout(page, 'Default');
+    for (const id of ['title', 'cpu', 'bar1']) {
+      const b = await page.getByTestId(`item-box-${id}`).boundingBox();
+      expect(b!.width, `${id} width`).toBeGreaterThanOrEqual(44);
+      expect(b!.height, `${id} height`).toBeGreaterThanOrEqual(44);
+    }
+    // A small box is still tappable.
+    await page.getByTestId('item-box-bar1').click();
+    await expect(page.getByTestId('item-box-bar1')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('a visible hint lists the keyboard shortcuts and describes the canvas', async ({ page }) => {
+    await mockApi(page);
+    await openLayout(page, 'Default');
+    const hint = page.getByTestId('canvas-shortcuts');
+    await expect(hint).toBeVisible();
+    for (const key of ['Arrows', 'Shift', 'Delete', 'Ctrl+D']) await expect(hint).toContainText(key);
+    await expect(page.getByTestId('layout-canvas')).toHaveAccessibleDescription(/Ctrl\+D/);
+  });
+});

@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, postBlob } from '../api/client';
 import type { Item, Layout } from '../api/types';
 import { SENSOR_DRAG_TYPE } from './catalog';
 import { duplicateItem, moveItem, removeItem, toLayoutPoint } from './model';
 import { createRenderScheduler, type RenderScheduler } from './scheduler';
+import styles from './Editor.module.css';
 
 export interface Rect {
   x: number;
@@ -18,6 +19,8 @@ const LIVE_REFRESH_MS = 1000;
 /** Hit boxes are padded and never smaller than this (layout pixels): empty text measures 0×0, captions lie outside. */
 const HIT_PAD = 8;
 const HIT_MIN = 24;
+/** Hit boxes are also never smaller than this on screen (CSS pixels), so items stay tappable on a phone. */
+const TOUCH_MIN_PX = 44;
 
 interface Rendered {
   url: string;
@@ -222,14 +225,25 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
   };
 
   const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+  /** Start and length of a hit box along one axis: centred on the item, at least TOUCH_MIN_PX on screen. */
+  const span = (pos: number, len: number, of: number) => ({
+    start: `calc(${pct(pos + len / 2, of)} - max(${TOUCH_MIN_PX / 2}px, ${pct(len / 2, of)}))`,
+    length: `max(${TOUCH_MIN_PX}px, ${pct(len, of)})`,
+  });
+  const hintId = useId();
 
   return (
     <div>
+      <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
+        Click or tap an item to select it, drag to move. Keys: Arrows move 1 px, Shift+Arrows 10 px, Delete removes,
+        Ctrl+D duplicates.
+      </p>
       <div
         ref={stageRef}
         data-testid="layout-canvas"
         tabIndex={0}
         aria-label={`Canvas of ${layout.name}`}
+        aria-describedby={hintId}
         onKeyDown={onKeyDown}
         onDragOver={onDragOver}
         onDrop={onDrop}
@@ -261,6 +275,8 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
         )}
         {layout.items.map((item) => {
           const b = hitBox(item, rendered);
+          const h = span(b.x, b.width, layout.width);
+          const v = span(b.y, b.height, layout.height);
           const selected = item.id === selectedId;
           return (
             <div
@@ -276,10 +292,10 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
               onPointerCancel={endDrag}
               style={{
                 position: 'absolute',
-                left: pct(b.x, layout.width),
-                top: pct(b.y, layout.height),
-                width: pct(b.width, layout.width),
-                height: pct(b.height, layout.height),
+                left: h.start,
+                top: v.start,
+                width: h.length,
+                height: v.length,
                 cursor: 'move',
                 touchAction: 'none', // dragging an item must not scroll; the rest of the canvas still scrolls the page
                 border: selected ? '2px solid var(--accent)' : '1px dashed rgba(255, 255, 255, 0.3)',

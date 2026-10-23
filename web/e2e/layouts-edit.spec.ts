@@ -33,6 +33,9 @@ const htmlSensors: SensorsResponse = {
 };
 
 test.describe('Layouts editing: sensor tree', () => {
+  // Drag and drop needs the sensor tree and the canvas on screen together (a scroll mid-drag loses the drop).
+  test.use({ viewport: { width: 1280, height: 900 } });
+
   test('dragging sensor adds bound item at drop point', async ({ page }) => {
     const api = await mockApi(page);
     await openLayout(page, 'Default');

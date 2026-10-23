@@ -308,3 +308,10 @@
   color: var(--danger);
   font-size: 0.85rem;
 }
+
+.shortcuts {
+  margin-bottom: var(--space-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
