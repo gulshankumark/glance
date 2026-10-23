@@ -14,7 +14,6 @@ export const Select: React.FC<SelectProps> = ({ options, children, style, ...pro
         color: 'var(--text)',
         border: '1px solid var(--surface-border)',
         borderRadius: 'var(--radius)',
-        outline: 'none',
         ...style,
       }}
       {...props}

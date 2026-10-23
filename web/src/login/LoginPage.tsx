@@ -54,7 +54,6 @@ export const LoginPage: React.FC<{ navigate: (hash: string) => void }> = ({ navi
                 border: '1px solid var(--surface-border)',
                 backgroundColor: 'var(--bg)',
                 color: 'var(--text)',
-                outline: 'none',
               }}
             />
           </Field>
