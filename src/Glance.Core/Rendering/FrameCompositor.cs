@@ -19,6 +19,7 @@ public sealed class FrameCompositor : IDisposable
     private readonly bool _scaled;   // layout pixels do not map 1:1 onto device pixels
     private readonly float _fitScale = 1;
     private readonly IJpegCodec _codec;
+    private readonly ColorCalibration? _calibration;
     private SKBitmap? _decoded;      // decode buffer when the frame cannot be decoded straight into the device surface
     private Decoded _state;
     private SKImage? _overlay;
@@ -28,9 +29,12 @@ public sealed class FrameCompositor : IDisposable
     private enum Decoded { None, IntoBuffer, IntoDevice }
 
     /// <param name="codec">Decodes stored frames and encodes device frames; defaults to Skia.</param>
-    public FrameCompositor(int layoutW, int layoutH, int deviceW, int deviceH, int rotation, IJpegCodec? codec = null)
+    /// <param name="calibration">Applied to the device surface just before each encode; null for none.</param>
+    public FrameCompositor(int layoutW, int layoutH, int deviceW, int deviceH, int rotation, IJpegCodec? codec = null,
+        ColorCalibration? calibration = null)
     {
         _codec = codec ?? SkiaJpegCodec.Instance;
+        _calibration = calibration;
         _layoutW = layoutW;
         _layoutH = layoutH;
         _rotation = rotation;
@@ -122,10 +126,14 @@ public sealed class FrameCompositor : IDisposable
     /// <summary>The composed device surface before encoding (tests compare it exactly).</summary>
     internal SKBitmap DeviceSurface => _device;
 
-    /// <summary>The device surface encoded within the device size limit.</summary>
+    /// <summary>
+    /// The device surface, calibrated in place, encoded within the device size limit. Every frame rewrites the whole
+    /// layout area (bars stay black, which calibration keeps black), so calibrating in place never compounds.
+    /// </summary>
     public EncodedJpeg Encode()
     {
         _canvas.Flush();
+        _calibration?.Apply(_device);
         using var pixels = _device.PeekPixels();
         return JpegEncoder.Encode(pixels, codec: _codec);
     }

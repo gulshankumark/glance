@@ -16,4 +16,37 @@
     <ProjectReference Include="..\Glance.Sensors.Windows\Glance.Sensors.Windows.csproj" />
     <ProjectReference Include="..\Glance.Platform.Windows\Glance.Platform.Windows.csproj" />
   </ItemGroup>
+
+  <!-- The web UI (web/, built by Vite into wwwroot/) is produced at publish time, after MSBuild has evaluated its
+       items, so wwwroot is kept out of the SDK's Content/static-web-asset handling (whose evaluation-time file list
+       goes stale when Vite replaces the hashed bundle) and added to the publish list from a fresh glob instead.
+       Plain build/test never runs npm. -p:SkipWebBuild=true publishes the wwwroot that is already there. -->
+  <ItemGroup>
+    <Content Remove="wwwroot\**" />
+    <None Remove="wwwroot\**" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <WebUiDir>$(MSBuildThisFileDirectory)..\..\web</WebUiDir>
+  </PropertyGroup>
+
+  <Target Name="BuildWebUi" BeforeTargets="ComputeResolvedFilesToPublishList" Condition="'$(SkipWebBuild)' != 'true'">
+    <Exec Command="node --version" IgnoreExitCode="true" EchoOff="true" StandardOutputImportance="Low" StandardErrorImportance="Low">
+      <Output TaskParameter="ExitCode" PropertyName="NodeExitCode" />
+    </Exec>
+    <Exec Command="npm --version" IgnoreExitCode="true" EchoOff="true" StandardOutputImportance="Low" StandardErrorImportance="Low">
+      <Output TaskParameter="ExitCode" PropertyName="NpmExitCode" />
+    </Exec>
+    <Error Condition="'$(NodeExitCode)' != '0' Or '$(NpmExitCode)' != '0'" Text="Publishing Glance.Service builds the web UI and requires Node.js (>=20) and npm on PATH, but they were not found. Install Node.js, or pass -p:SkipWebBuild=true to publish the existing src\Glance.Service\wwwroot." />
+    <Exec Command="npm ci" WorkingDirectory="$(WebUiDir)" />
+    <Exec Command="npm run build" WorkingDirectory="$(WebUiDir)" />
+  </Target>
+
+  <Target Name="IncludeWebUiInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_WebUiFile Include="$(MSBuildThisFileDirectory)wwwroot\**" />
+      <ResolvedFileToPublish Include="@(_WebUiFile)" RelativePath="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)wwwroot\index.html')" Text="src\Glance.Service\wwwroot\index.html is missing: the web UI was not built (run npm run build in web/ or publish without SkipWebBuild)." />
+  </Target>
 </Project>

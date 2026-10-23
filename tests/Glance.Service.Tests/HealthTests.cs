@@ -41,7 +41,7 @@ public class HealthTests
     {
         await using var f = new GlanceFactory();
         var html = await f.CreateClient().GetStringAsync("/");
-        Assert.Contains("Glance is running", html);
+        Assert.Contains("<title>Glance</title>", html);
     }
 
     [Fact]

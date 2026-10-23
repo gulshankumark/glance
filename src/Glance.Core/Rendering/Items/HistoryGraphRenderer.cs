@@ -19,7 +19,7 @@ public static class HistoryGraphRenderer
         var st = GaugeState.Resolve(g, ctx);
         var id = ctx.Sensors.Resolve(SensorRef.Parse(g.Sensor));
         var history = id is null ? Array.Empty<double?>() : ctx.Sensors.History(id, windowSeconds);
-        var rect = new SKRect(g.X, g.Y, g.X + g.Width, g.Y + g.Height);
+        var rect = GaugeMath.Box(g);
 
         canvas.Save();
         canvas.ClipRect(rect);

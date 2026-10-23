@@ -80,7 +80,18 @@ else if (binding == StartupBinding.None)
 app.UseAuthentication();
 app.UseMiddleware<AccessGate>();   // before static files and endpoints
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // index.html must be revalidated so an upgrade never leaves a browser asking for removed hashed bundles;
+    // the bundles under /assets carry a content hash in their names and never change.
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+        else if (ctx.Context.Request.Path.StartsWithSegments("/assets"))
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+    },
+});
 app.UseRouting();
 app.UseRateLimiter();
 app.MapAuthApi();
@@ -91,6 +102,7 @@ app.MapDevicesApi();
 app.MapSettingsApi();
 app.MapAssetsApi();
 app.MapPreviewApi();
+app.MapUiSupportApi();
 app.MapEventsApi();
 app.MapLogsApi();
 app.Run();

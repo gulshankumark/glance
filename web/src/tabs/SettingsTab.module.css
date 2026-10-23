@@ -1,0 +1,23 @@
+.grid { display: grid; grid-template-columns: 1fr; gap: 0 var(--space-4); }
+@media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+.input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+}
+.check { display: flex; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-3); }
+.check input { margin-top: 4px; flex: none; }
+.check label { font-size: 0.9rem; }
+.checkHint { display: block; font-size: 0.8rem; color: var(--muted); }
+.subTitle { font-size: 1rem; font-weight: 600; margin-bottom: var(--space-2); }
+.subSection + .subSection { border-top: 1px solid var(--surface-border); padding-top: var(--space-4); margin-top: var(--space-4); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.ok { font-size: 0.85rem; color: var(--muted); }
+.error { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-2); }
+.muted { color: var(--muted); font-size: 0.9rem; }
+.about p { margin-bottom: var(--space-2); overflow-wrap: anywhere; }
+.about a { color: var(--accent); }

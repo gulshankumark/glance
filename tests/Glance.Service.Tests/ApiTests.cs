@@ -101,6 +101,160 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task Device_calibration_round_trips_and_is_validated()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        var d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(1.0, d.GetProperty("gamma").GetDouble());
+        Assert.Equal(100, d.GetProperty("brightness").GetInt32());
+
+        var ok = await c.PutAsync($"/api/devices/{key}", Json(new { gamma = 2.2, brightness = 80 }));
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal(2.2, (await ok.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("gamma").GetDouble());
+        d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(2.2, d.GetProperty("gamma").GetDouble());
+        Assert.Equal(80, d.GetProperty("brightness").GetInt32());
+
+        foreach (var (body, error) in new[]
+        {
+            ("""{"gamma":0}""", "gamma must be 0.5..3"),
+            ("""{"gamma":3.5}""", "gamma must be 0.5..3"),
+            ("""{"gamma":"NaN"}""", "gamma must be 0.5..3"),
+            ("""{"gamma":"Infinity"}""", "gamma must be 0.5..3"),
+            ("""{"brightness":5}""", "brightness must be 10..100"),
+            ("""{"brightness":101}""", "brightness must be 10..100"),
+        })
+        {
+            var r = await c.PutAsync($"/api/devices/{key}", Json(body));
+            Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+            Assert.Equal(error, (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync($"/api/devices/{key}", Json("""{"gamma":"bright"}"""))).StatusCode);
+        Assert.Equal(2.2, f.Settings.Current.Devices[key].Gamma);
+        Assert.Equal(80, f.Settings.Current.Devices[key].Brightness);
+
+        // Numbers as strings are read like rotation and brightness strings.
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/devices/{key}", Json("""{"gamma":"1.8","brightness":"90"}"""))).StatusCode);
+        Assert.Equal(1.8, f.Settings.Current.Devices[key].Gamma);
+        Assert.Equal(90, f.Settings.Current.Devices[key].Brightness);
+    }
+
+    [Fact]
+    public async Task Test_pattern_starts_and_stops_and_unknown_device_is_404()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        for (var i = 0; i < 100 && f.Services.GetRequiredService<Glance.Core.Sessions.DeviceManager>().Session(key) is null; i++) await Task.Delay(50);
+        // No active layout: the fallback screen is black at the top right, where the pattern's white step is.
+        async Task<bool> TopRightWhite(bool expected)
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                var frames = f.Connection.Frames;
+                if (frames.Count > 0)
+                {
+                    using var bmp = SkiaSharp.SKBitmap.Decode(frames[^1].Data.ToArray());
+                    if (bmp.GetPixel(1274, 5).Red > 240 == expected) return true;
+                }
+                await Task.Delay(50);
+            }
+            return false;
+        }
+        Assert.True(await TopRightWhite(false));
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/devices/{key}/test-pattern", null)).StatusCode);
+        Assert.True(await TopRightWhite(true));
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/devices/{key}/test-pattern")).StatusCode);
+        Assert.True(await TopRightWhite(false));
+        var unknown = await c.PostAsync("/api/devices/unknown/test-pattern", null);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal("unknown device", (await unknown.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync("/api/devices/unknown/test-pattern")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Render_is_not_affected_by_device_calibration()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        async Task<byte[]> Render() =>
+            await (await c.PostAsync($"/api/render?device={key}", Json(SampleLayout("Draft")))).Content.ReadAsByteArrayAsync();
+        var before = await Render();
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/devices/{key}", Json(new { gamma = 2.5, brightness = 40 }))).StatusCode);
+        Assert.Equal(before, await Render());
+    }
+
+    [Fact]
+    public async Task Devices_report_fps()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        for (var i = 0; i < 100 && f.Connection.Frames.Count == 0; i++) await Task.Delay(50);
+        var d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(key, d.GetProperty("key").GetString());
+        Assert.True(d.GetProperty("framesSent").GetInt32() >= 1);
+        Assert.True(d.GetProperty("fps").GetDouble() > 0);
+    }
+
+    [Fact]
+    public async Task Devices_without_session_report_zero_fps()
+    {
+        await using var f = new GlanceFactory(withDevice: true);
+        f.Driver.Always = () => new Glance.Core.Devices.ConnectResult.Failed("busy");
+        var c = f.CreateClient();
+        await FirstDeviceKey(c);
+        var d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(0, d.GetProperty("fps").GetDouble());
+        Assert.Equal(0, d.GetProperty("framesSent").GetInt32());
+    }
+
+    [Fact]
+    public async Task Put_device_with_null_activeLayout_clears_it_but_absent_keeps_it()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        await c.PutAsync("/api/layouts/Gaming", Json(SampleLayout("Gaming")));
+        var key = await FirstDeviceKey(c);
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/devices/{key}", Json(new { activeLayout = "Gaming" }))).StatusCode);
+
+        var kept = await c.PutAsync($"/api/devices/{key}", Json("""{"rotation":180}"""));
+        Assert.Equal(HttpStatusCode.OK, kept.StatusCode);
+        Assert.Equal("Gaming", (await kept.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("activeLayout").GetString());
+        Assert.Equal("Gaming", f.Settings.Current.Devices[key].ActiveLayout);
+
+        var cleared = await c.PutAsync($"/api/devices/{key}", Json("""{"activeLayout":null}"""));
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        var body = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("activeLayout").ValueKind);
+        Assert.Equal(180, body.GetProperty("rotation").GetInt32());
+        Assert.Null(f.Settings.Current.Devices[key].ActiveLayout);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync($"/api/devices/{key}", Json("""{"activeLayout":5}"""))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Settings_change_emits_devices_event()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        using var cts = new CancellationTokenSource();
+        var resp = await c.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(cts.Token));
+        Assert.Equal("event: sensors", await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/devices/{key}", Json(new { rotation = 90 }))).StatusCode);
+
+        // Device-list changes may also produce devices events; wait for the one carrying the new rotation.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        string? data = null;
+        while (DateTime.UtcNow < deadline && data?.Contains("\"rotation\":90") != true)
+        {
+            var line = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            if (line == "event: devices") data = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Contains("\"rotation\":90", data);
+        cts.Cancel();
+    }
+
+    [Fact]
     public async Task Layout_size_not_matching_rotated_canvas_is_flagged()
     {
         await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
@@ -246,6 +400,22 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsync("/api/roles/bogus", Json(new { sensorId = (string?)null }))).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/roles/gpu.load", Json(new { sensorId = (string?)null }))).StatusCode);
         Assert.Empty(f.Settings.Current.RolePins);
+    }
+
+    [Fact]
+    public async Task Sensors_list_shows_persisted_role_pins()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        var before = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.Empty(before.GetProperty("pins").EnumerateObject());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/roles/gpu.load", Json(new { sensorId = "cpu/t" }))).StatusCode);
+        var pinned = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.Equal("cpu/t", pinned.GetProperty("pins").GetProperty("gpu.load").GetString());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/roles/gpu.load", Json(new { sensorId = (string?)null }))).StatusCode);
+        var after = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.False(after.GetProperty("pins").TryGetProperty("gpu.load", out _));
     }
 
     [Fact]

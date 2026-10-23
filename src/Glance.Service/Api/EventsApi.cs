@@ -20,6 +20,7 @@ public static class EventsApi
             var changed = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
             void OnDevicesChanged() => changed.Writer.TryWrite(true);
             devices.DevicesChanged += OnDevicesChanged;
+            settings.Changed += OnDevicesChanged;   // rotation and active layout live in the settings
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             try
             {
@@ -48,6 +49,7 @@ public static class EventsApi
             finally
             {
                 devices.DevicesChanged -= OnDevicesChanged;
+                settings.Changed -= OnDevicesChanged;
             }
         });
     }

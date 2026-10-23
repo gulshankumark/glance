@@ -1,0 +1,335 @@
+.panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+@media (min-width: 760px) {
+  .panels {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    align-items: start;
+  }
+}
+
+.panel {
+  min-width: 0;
+}
+
+.panelTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+}
+
+.group {
+  margin-bottom: var(--space-2);
+}
+
+.group > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: var(--space-1) 0;
+}
+
+.leaves {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.leaf {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: grab;
+}
+
+.leaf:hover,
+.leaf:focus-visible {
+  border-color: var(--surface-border);
+}
+
+.leafName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leafDetail {
+  margin-left: var(--space-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.leafValue {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.pickList {
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.addMenu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.menuAnchor {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.menuItem {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--bg);
+}
+
+.assetGrid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--space-2);
+}
+
+.assetTile {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.assetTile[aria-pressed='true'] {
+  border: 2px solid var(--accent);
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+}
+
+.assetCaption {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+.leaf[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.selectedName {
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.colorRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.swatch {
+  flex: none;
+  width: 36px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: 0.875rem;
+}
+
+.fieldset {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.fieldset > legend {
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0 var(--space-1);
+}
+
+.thresholdRow {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.assetField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: 220px;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: 0.9rem;
+}
+
+.segment {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+}
+
+.importRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.error {
+  width: 100%;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.shortcuts {
+  margin-bottom: var(--space-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* Snap guide while dragging on the canvas: a 1 px accent line, above the items, never hit by the pointer. */
+.snapGuide {
+  position: absolute;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Align / distribute buttons below the canvas; they wrap on narrow screens. */
+.alignBar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: 0.85rem;
+}

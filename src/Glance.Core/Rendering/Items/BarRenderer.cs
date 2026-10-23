@@ -8,7 +8,7 @@ public static class BarRenderer
     public static void Draw(SKCanvas canvas, BarItem b, RenderContext ctx)
     {
         var st = GaugeState.Resolve(b, ctx);
-        var rect = new SKRect(b.X, b.Y, b.X + b.Width, b.Y + b.Height);
+        var rect = GaugeMath.Box(b);
         canvas.Save();
         if (b.Rounded)
         {

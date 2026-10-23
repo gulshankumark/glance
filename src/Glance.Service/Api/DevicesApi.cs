@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Glance.Core.Layouts;
 using Glance.Core.Rendering;
 using Glance.Core.Sessions;
@@ -6,11 +8,22 @@ namespace Glance.Service.Api;
 
 public static class DevicesApi
 {
-    public sealed record DevicePatch(int? Rotation, string? ActiveLayout);
+    /// <summary>How long a test pattern stays on screen unless stopped.</summary>
+    public static readonly TimeSpan TestPatternDuration = TimeSpan.FromSeconds(120);
+
+    /// <param name="ActiveLayout">Absent: unchanged; null: cleared; a string: the name of an existing layout.</param>
+    /// <param name="Gamma">
+    /// Numbers in strings are read like the other fields' (web defaults); "NaN" and "Infinity" are read too, so they get
+    /// the range error rather than a bare 400.
+    /// </param>
+    public sealed record DevicePatch(int? Rotation, JsonElement ActiveLayout,
+        [property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.AllowNamedFloatingPointLiterals)]
+        double? Gamma,
+        int? Brightness);
 
     public sealed record DeviceView(string Key, string DriverId, string Name, DeviceStatus Status, int Width, int Height,
         string ModelCode, string Serial, string? Message, DateTimeOffset? NextRetry,
-        int Rotation, string? ActiveLayout, bool LayoutMismatch);
+        int Rotation, string? ActiveLayout, bool LayoutMismatch, double Fps, int FramesSent, double Gamma, int Brightness);
 
     public static void MapDevicesApi(this IEndpointRouteBuilder app)
     {
@@ -22,20 +35,42 @@ public static class DevicesApi
             if (devices.Devices.All(d => d.Key != key)) return Results.NotFound(new { error = "unknown device" });
             if (body.Rotation is { } r && r is not (0 or 90 or 180 or 270))
                 return Results.BadRequest(new { error = "rotation must be 0, 90, 180 or 270" });
-            var layoutName = body.ActiveLayout is null ? null : layouts.Get(body.ActiveLayout)?.Name;
-            if (body.ActiveLayout is not null && layoutName is null)
-                return Results.BadRequest(new { error = $"layout '{body.ActiveLayout}' does not exist" });
+            if (body.Gamma is { } g && !DeviceSettings.ValidGamma(g)) return Results.BadRequest(new { error = DeviceSettings.GammaError });
+            if (body.Brightness is { } b && !DeviceSettings.ValidBrightness(b)) return Results.BadRequest(new { error = DeviceSettings.BrightnessError });
+            var active = body.ActiveLayout;
+            if (active.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.String))
+                return Results.BadRequest(new { error = "activeLayout must be a layout name or null" });
+            var requested = active.ValueKind == JsonValueKind.String ? active.GetString() : null;
+            var layoutName = requested is null ? null : layouts.Get(requested)?.Name;
+            if (requested is not null && layoutName is null)
+                return Results.BadRequest(new { error = $"layout '{requested}' does not exist" });
             try
             {
                 settings.Update(s =>
                 {
                     if (!s.Devices.TryGetValue(key, out var d)) s.Devices[key] = d = new DeviceSettings();
                     if (body.Rotation is { } rot) d.Rotation = rot;
-                    if (layoutName is not null) d.ActiveLayout = layoutName;
+                    if (body.Gamma is { } gamma) d.Gamma = gamma;
+                    if (body.Brightness is { } brightness) d.Brightness = brightness;
+                    if (active.ValueKind != JsonValueKind.Undefined) d.ActiveLayout = layoutName;
                 });
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             return Results.Ok(Payload(devices, settings, layouts).FirstOrDefault(d => d.Key == key));
+        });
+
+        app.MapPost("/api/devices/{key}/test-pattern", (string key, DeviceManager devices) =>
+        {
+            if (devices.Session(key) is not { } session) return Results.NotFound(new { error = "unknown device" });
+            session.ShowTestPattern(TestPatternDuration);
+            return Results.NoContent();
+        });
+
+        app.MapDelete("/api/devices/{key}/test-pattern", (string key, DeviceManager devices) =>
+        {
+            if (devices.Session(key) is not { } session) return Results.NotFound(new { error = "unknown device" });
+            session.StopTestPattern();
+            return Results.NoContent();
         });
     }
 
@@ -49,8 +84,10 @@ public static class DevicesApi
             var active = s?.ActiveLayout;
             var layout = active is null ? null : layouts.Get(active);
             var mismatch = layout is not null && (layout.Width, layout.Height) != Orientation.Canvas(d.Width, d.Height, rotation);
+            var session = devices.Session(d.Key);
             return new DeviceView(d.Key, d.DriverId, d.Name, d.Status, d.Width, d.Height, d.ModelCode, d.Serial,
-                d.Message, d.NextRetry, rotation, active, mismatch);
+                d.Message, d.NextRetry, rotation, active, mismatch, session?.Fps ?? 0, session?.FramesSent ?? 0,
+                s?.Gamma ?? 1.0, s?.Brightness ?? 100);
         }).ToList();
     }
 }

@@ -27,7 +27,8 @@ public static class SensorsApi
             });
             var roles = Roles.All.ToDictionary(r => r, r => hub.Resolve(new SensorRef(true, r)));
             var diagnostics = source.Diagnostics.Select(d => new { d.Code, d.Message });
-            return new { sensors, roles, diagnostics };
+            var pins = settings.Current.RolePins.ToDictionary(kv => kv.Key, kv => kv.Value);
+            return new { sensors, roles, pins, diagnostics };
         });
 
         app.MapPut("/api/sensors/alias", (AliasBody body, SensorHub hub, SettingsStore settings) =>

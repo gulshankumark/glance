@@ -8,11 +8,11 @@ public static class ArcGaugeRenderer
     public static void Draw(SKCanvas canvas, ArcGaugeItem a, RenderContext ctx)
     {
         var st = GaugeState.Resolve(a, ctx);
-        var cx = a.X + a.Width / 2;
-        var cy = a.Y + a.Height / 2;
+        var box = GaugeMath.Box(a);
+        var (cx, cy) = (box.MidX, box.MidY);
         var thickness = LayoutLimits.Clamp(a.Thickness, LayoutLimits.MinThickness, LayoutLimits.MaxThickness, 16);
         var (start, sweep) = SafeAngles(a.StartAngle, a.SweepAngle);
-        var radius = Math.Min(a.Width, a.Height) / 2 - thickness / 2;
+        var radius = Math.Min(box.Width, box.Height) / 2 - thickness / 2;
         if (radius > 0)
         {
             var oval = new SKRect(cx - radius, cy - radius, cx + radius, cy + radius);
