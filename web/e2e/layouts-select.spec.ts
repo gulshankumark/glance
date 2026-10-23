@@ -225,4 +225,69 @@ test.describe('Layouts: multi-selection', () => {
     await expect(pressed(page)).toHaveCount(1);
     await expect(onCanvas(page, BAR)).toHaveAttribute('aria-pressed', 'true');
   });
+  test('a press with a little jitter is a click: narrows the selection, moves nothing', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+
+    const jitter = async (name: RegExp) => {
+      const b = (await onCanvas(page, name).boundingBox())!;
+      const at = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x + 2, at.y + 1);
+      await page.mouse.move(at.x - 1, at.y + 2);
+      await page.mouse.up();
+    };
+    await jitter(CPU);
+    await expect(pressed(page)).toHaveCount(1);
+    await expect(onCanvas(page, CPU)).toHaveAttribute('aria-pressed', 'true');
+
+    // Same on a single selected item.
+    await jitter(CPU);
+    await expect(onCanvas(page, CPU)).toHaveAttribute('aria-pressed', 'true');
+    await expect(unsaved(page)).toBeHidden();
+    expect(api.renders().every((l) => l.items.every((i) => {
+      const seed = { title: [40, 40], cpu: [40, 200], bar1: [600, 300] }[i.id];
+      return seed !== undefined && i.x === seed[0] && i.y === seed[1];
+    }))).toBe(true);
+  });
+
+  test('a 10 px drag moves the group and keeps it selected', async ({ page }) => {
+    const api = await mockApi(page);
+    await openDefault(page);
+    await selectTwo(page);
+
+    const b = (await onCanvas(page, CPU).boundingBox())!;
+    const at = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 10, at.y, { steps: 5 });
+    await page.mouse.up();
+
+    const scale = (await canvas(page).boundingBox())!.width / 1280;
+    await expect.poll(() => xOf(lastRender(api), 'cpu')).toBeGreaterThan(40);
+    const moved = xOf(lastRender(api), 'cpu')!;
+    expect(Math.abs(moved - (40 + 10 / scale))).toBeLessThanOrEqual(1);
+    expect(xOf(lastRender(api), 'title')).toBe(moved);
+    await expect(pressed(page)).toHaveCount(2);
+  });
+
+  test('Items list: after Delete, focus moves to the next item, the previous one, then the list', async ({ page }) => {
+    await mockApi(page);
+    await openDefault(page);
+    const list = page.getByRole('list', { name: 'Items' });
+
+    await inList(page, TITLE).focus();
+    await page.keyboard.press('Delete');
+    await expect(inList(page, CPU)).toBeFocused();
+
+    await inList(page, BAR).focus();
+    await page.keyboard.press('Delete');
+    await expect(inList(page, CPU)).toBeFocused();
+
+    await page.keyboard.press('Delete');
+    await expect(list).toHaveCount(0);
+    await expect(page.getByText('No items yet')).toBeFocused();
+  });
 });

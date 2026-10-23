@@ -21,6 +21,8 @@ const HIT_PAD = 8;
 const HIT_MIN = 24;
 /** Hit boxes are also never smaller than this on screen (CSS pixels), so items stay tappable on a phone. */
 const TOUCH_MIN_PX = 44;
+/** A press becomes a drag only after the pointer moved this far (CSS pixels); below it, it is a click. */
+const DRAG_THRESHOLD_PX = 4;
 
 interface Rendered {
   url: string;
@@ -134,7 +136,11 @@ export interface CanvasProps {
 
 interface Drag {
   pointerId: number;
+  /** Press point in layout pixels (drag deltas are measured from it) and in client pixels (for the threshold). */
   start: { x: number; y: number };
+  startClient: { x: number; y: number };
+  /** Set once the pointer crossed DRAG_THRESHOLD_PX; until then nothing moves. */
+  active: boolean;
   /** Positions of every dragged (selected) item when the drag started. */
   origins: Record<string, { x: number; y: number }>;
   /** A plain press on an item of a multi-selection: released without moving, it narrows the selection to it. */
@@ -180,16 +186,23 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     const origins: Drag['origins'] = {};
     for (const i of layoutRef.current.items) if (ids.includes(i.id)) origins[i.id] = { x: i.x, y: i.y };
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { pointerId: e.pointerId, start: pointAt(e), origins, narrowTo };
+    dragRef.current = {
+      pointerId: e.pointerId, start: pointAt(e), startClient: { x: e.clientX, y: e.clientY }, active: false, origins,
+      narrowTo,
+    };
   };
 
   const onBoxPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.startClient.x, e.clientY - drag.startClient.y) < DRAG_THRESHOLD_PX) return;
+      drag.active = true;
+      drag.narrowTo = null;
+    }
     const p = pointAt(e);
     const dx = Math.round(p.x - drag.start.x);
     const dy = Math.round(p.y - drag.start.y);
-    if (dx !== 0 || dy !== 0) drag.narrowTo = null;
     // Every dragged item lands at its own origin + the same delta, whatever moves were applied before.
     const moves: Record<string, { dx: number; dy: number }> = {};
     for (const i of layoutRef.current.items) {
