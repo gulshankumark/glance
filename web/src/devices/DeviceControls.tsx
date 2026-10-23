@@ -37,11 +37,17 @@ interface LayoutSelectProps {
   error?: string;
 }
 
-/** The "Active layout" select; "None" clears the layout (activeLayout: null). */
+/**
+ * The "Active layout" select; "None" clears the layout (activeLayout: null). An active layout missing from `layouts`
+ * (list still loading or failed) still gets an option, so the select never claims "None" for it.
+ */
 export const LayoutSelect: React.FC<LayoutSelectProps> = ({ device, layouts, onChange, error }) => (
   <Field label="Active layout" error={error}>
     <Select value={device.activeLayout ?? ''} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">None (built-in status screen)</option>
+      {device.activeLayout !== null && !layouts.some((l) => l.name === device.activeLayout) && (
+        <option value={device.activeLayout}>{device.activeLayout}</option>
+      )}
       {layouts.map((l) => (
         <option key={l.name} value={l.name} disabled={l.error !== null}>
           {l.error === null ? `${l.name} (${l.width}×${l.height})` : `${l.name} (cannot be loaded)`}
