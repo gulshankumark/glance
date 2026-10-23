@@ -73,16 +73,38 @@ test.describe('Display Tab', () => {
     await expect(page.getByRole('button', { name: '180°', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('preview refreshes about once a second while visible', async ({ page }) => {
+  test('preview refreshes once a second while visible', async ({ page }) => {
+    // A paused fake clock makes the schedule exact: each refresh lands 1000 ms after the last one, never earlier.
+    const t0 = new Date('2026-01-01T00:00:00Z').getTime();
+    await page.clock.install({ time: t0 });
+    await page.clock.pauseAt(t0 + 1000);
     const api = await mockApi(page);
     await page.goto('/#display');
-    await expect.poll(() => previewLoaded(page)).toBe(true);
+    await expect
+      .poll(async () => {
+        await page.clock.runFor(250);
+        return previewLoaded(page);
+      })
+      .toBe(true);
+    // Line up with the refresh schedule: advance until the next refresh is made.
+    const start = api.previewRequests();
+    let shown = await preview(page).getAttribute('src');
+    for (let i = 0; i < 4 && api.previewRequests() === start; i++) {
+      await page.clock.runFor(250);
+      await page.waitForTimeout(100);
+    }
 
-    const before = api.previewRequests();
-    await page.waitForTimeout(3500);
-    const made = api.previewRequests() - before;
-    expect(made).toBeGreaterThanOrEqual(3);
-    expect(made).toBeLessThanOrEqual(4);
+    for (let i = 0; i < 3; i++) {
+      const before = api.previewRequests();
+      expect(before).toBeGreaterThan(start);
+      await expect.poll(() => preview(page).getAttribute('src')).not.toBe(shown); // the refresh has finished
+      shown = await preview(page).getAttribute('src');
+      await page.clock.runFor(750);
+      await page.waitForTimeout(200);
+      expect(api.previewRequests()).toBe(before);
+      await page.clock.runFor(250);
+      await expect.poll(() => api.previewRequests()).toBe(before + 1);
+    }
   });
 
   test('preview refresh pauses while hidden', async ({ page }) => {

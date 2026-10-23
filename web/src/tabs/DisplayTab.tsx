@@ -14,9 +14,9 @@ const PREVIEW_INTERVAL_MS = 1000;
 const previewPath = (key: string, t: number) => `/api/preview/${encodeURIComponent(key)}.jpg?t=${t}`;
 
 /**
- * Object URLs of the latest preview frame per device key. Refreshes at most once per PREVIEW_INTERVAL_MS (paced by
- * timestamp, so device pushes never add requests), only while the page is visible, one request per device at a
- * time; a failed request (404 before the first frame) keeps the last image.
+ * Object URLs of the latest preview frame per device key. Refreshes once per PREVIEW_INTERVAL_MS (the next refresh is
+ * timed for lastRefresh + PREVIEW_INTERVAL_MS, so device pushes never add requests), only while the page is visible,
+ * one request per device at a time; a failed request (404 before the first frame) keeps the last image.
  */
 function usePreviews(devices: DeviceView[] | null): Record<string, string> {
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -28,6 +28,7 @@ function usePreviews(devices: DeviceView[] | null): Record<string, string> {
     const inFlight = new Set<string>();
     let lastRefresh = -Infinity;
     let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const refresh = () => {
       const list = devicesRef.current;
@@ -54,13 +55,23 @@ function usePreviews(devices: DeviceView[] | null): Record<string, string> {
       }
     };
 
-    refresh();
-    const timer = setInterval(refresh, PREVIEW_INTERVAL_MS / 4);
-    document.addEventListener('visibilitychange', refresh);
+    // Refresh if due, then wake up exactly when the next one is due; nothing is scheduled while hidden. Until the
+    // device list has loaded, or while it is empty (nothing refreshed though due), check again every quarter interval.
+    const tick = () => {
+      clearTimeout(timer);
+      if (disposed) return;
+      refresh();
+      if (document.visibilityState !== 'visible') return;
+      const wait = lastRefresh + PREVIEW_INTERVAL_MS - Date.now();
+      timer = setTimeout(tick, wait > 0 ? wait : PREVIEW_INTERVAL_MS / 4);
+    };
+
+    tick();
+    document.addEventListener('visibilitychange', tick);
     return () => {
       disposed = true;
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', tick);
       Object.values(current).forEach((u) => URL.revokeObjectURL(u));
     };
   }, []);
