@@ -212,9 +212,11 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   /** Adds an item on top of the draft and selects it. */
   const insert = (item: Item) => {
     if (!doc) return;
-    const draft = addItem(doc.draft, item);
-    setDoc({ ...doc, draft });
-    setSelectedId(draft.items[draft.items.length - 1].id);
+    // The free id is picked against the shown draft so it can be selected; addItem checks it again on the latest one.
+    const { items } = addItem(doc.draft, item);
+    const { id } = items[items.length - 1];
+    setDoc((d) => d && { ...d, draft: addItem(d.draft, { ...item, id }) });
+    setSelectedId(id);
   };
 
   // In the image pickers: imported images join the list, where they can be picked.
@@ -543,7 +545,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   onSelect={setSelectedId}
                   onRemove={(id) => {
                     if (id === selectedId) setSelectedId(null);
-                    setDoc({ ...doc, draft: removeItem(doc.draft, id) });
+                    setDoc((d) => d && { ...d, draft: removeItem(d.draft, id) });
                   }}
                 />
                 <h3 className={editorStyles.panelTitle} style={{ marginTop: 'var(--space-4)' }}>
