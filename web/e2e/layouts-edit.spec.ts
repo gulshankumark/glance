@@ -82,6 +82,12 @@ test.describe('Layouts editing: sensor tree', () => {
     await expect(leaf(page, 'role:cpu.temperature')).toContainText('70 °C');
   });
 
+  test('sensor tree shows temperatures in the chosen unit', async ({ page }) => {
+    await mockApi(page, { settings: { unit: 'fahrenheit' } });
+    await openLayout(page, 'Default');
+    await expect(leaf(page, 'gpu/t')).toContainText('118 °F');
+  });
+
   test('search filters tree', async ({ page }) => {
     await mockApi(page);
     await openLayout(page, 'Default');

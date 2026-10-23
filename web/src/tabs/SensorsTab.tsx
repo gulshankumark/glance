@@ -3,9 +3,9 @@ import { api, ApiError } from '../api/client';
 import type { Sensor, SensorsResponse } from '../api/types';
 import { displayName, roleLabel } from '../editor/catalog';
 import { useTreeGroups } from '../editor/SensorTree';
-import { formatValue } from '../lib/format';
 import { useSensorValues } from '../live/LiveProvider';
 import { LiveValue } from '../live/LiveValue';
+import { useFormatSensorValue } from '../live/TemperatureUnit';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -125,6 +125,7 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
   const [query, setQuery] = useState('');
   const [roleErrors, setRoleErrors] = useState<Record<string, string>>({});
   const values = useSensorValues();
+  const format = useFormatSensorValue();
 
   const load = useCallback(async () => {
     try {
@@ -246,7 +247,7 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
                           <span className={styles.sub}>{s.hardware}</span>
                         </td>
                         <td className={styles.value}>
-                          <LiveValue>{formatValue(v, s.unit ?? undefined)}</LiveValue>
+                          <LiveValue>{format(v, s.unit)}</LiveValue>
                         </td>
                         <td className={styles.alias}>
                           <AliasCell sensor={s} onSaved={aliasSaved} />

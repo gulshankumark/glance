@@ -104,6 +104,27 @@ test.describe('Sensors tab', () => {
     await expect(row(page, 'cpu/t')).toContainText('71 °C');
   });
 
+  test('temperatures follow the unit setting, live', async ({ page }) => {
+    const api = await mockApi(page, { settings: { unit: 'fahrenheit' } });
+    await page.goto('/#sensors');
+    await expect(row(page, 'cpu/t')).toContainText('131 °F');
+
+    // A settings change is announced by a devices event; the page follows without a reload.
+    api.settings.unit = 'celsius';
+    await api.sendEvent('devices', api.devices);
+    await expect(row(page, 'cpu/t')).toContainText('55 °C');
+  });
+
+  test('a unit saved in Settings applies to the Sensors tab at once', async ({ page }) => {
+    await mockApi(page);
+    await page.goto('/#settings');
+    await page.getByLabel('Temperature unit').selectOption('fahrenheit');
+    await page.getByRole('button', { name: 'Save' }).first().click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+    await page.goto('/#sensors');
+    await expect(row(page, 'cpu/t')).toContainText('131 °F');
+  });
+
   test('search filters the table', async ({ page }) => {
     await mockApi(page);
     await page.goto('/#sensors');

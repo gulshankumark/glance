@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { SensorsResponse } from '../api/types';
-import { formatValue } from '../lib/format';
 import { useSensorValues } from '../live/LiveProvider';
 import { LiveValue } from '../live/LiveValue';
+import { useFormatSensorValue } from '../live/TemperatureUnit';
 import { displayName, matches, roleLabel, ROLE_PREFIX, SENSOR_DRAG_TYPE, sensorGroups } from './catalog';
 import styles from './Editor.module.css';
 
@@ -67,6 +67,7 @@ export function useTreeGroups(catalog: SensorsResponse | null, query: string): A
 export const SensorTree: React.FC<SensorTreeProps> = ({ catalog, onAdd }) => {
   const [query, setQuery] = useState('');
   const values = useSensorValues();
+  const format = useFormatSensorValue();
 
   const groups = useTreeGroups(catalog, query);
   if (!catalog) return <p className={styles.muted}>Loading sensors…</p>;
@@ -110,7 +111,7 @@ export const SensorTree: React.FC<SensorTreeProps> = ({ catalog, onAdd }) => {
                     {leaf.detail && <span className={styles.leafDetail}>{leaf.detail}</span>}
                   </span>
                   {leaf.sensorId && (
-                    <LiveValue className={styles.leafValue}>{formatValue(valueOf(leaf), leaf.unit ?? undefined)}</LiveValue>
+                    <LiveValue className={styles.leafValue}>{format(valueOf(leaf), leaf.unit)}</LiveValue>
                   )}
                 </button>
               </li>

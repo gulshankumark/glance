@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatNextRetry, formatValue } from './format';
+import { formatNextRetry, formatSensorValue, formatValue } from './format';
 
 describe('formatValue', () => {
   it('formatValue null → "—"', () => {
@@ -27,5 +27,20 @@ describe('formatNextRetry', () => {
 
   it('formats a valid ISO time', () => {
     expect(formatNextRetry('2026-10-23T10:15:30Z')).toMatch(/\d/);
+  });
+});
+
+describe('formatSensorValue', () => {
+  it('converts temperatures (canonical °C) to the chosen unit', () => {
+    expect(formatSensorValue(55, '°C', 'celsius')).toBe('55 °C');
+    expect(formatSensorValue(55, '°C', 'fahrenheit')).toBe('131 °F');
+    expect(formatSensorValue(51.62, '°C', 'fahrenheit')).toBe('125 °F');
+    expect(formatSensorValue(null, '°C', 'fahrenheit')).toBe('—');
+  });
+
+  it('leaves other units alone', () => {
+    expect(formatSensorValue(62.4, '%', 'fahrenheit')).toBe('62 %');
+    expect(formatSensorValue(1148, 'RPM', 'fahrenheit')).toBe('1148 RPM');
+    expect(formatSensorValue(5, null, 'fahrenheit')).toBe('5');
   });
 });

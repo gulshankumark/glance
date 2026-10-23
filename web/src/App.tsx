@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { navBlocked } from './lib/navGuard';
 import { LiveProvider, useLiveStatus } from './live/LiveProvider';
+import { TemperatureUnitProvider } from './live/TemperatureUnit';
 import { Banner } from './ui/Banner';
 import { DisplayTab } from './tabs/DisplayTab';
 import { LayoutsTab } from './tabs/LayoutsTab';
@@ -162,7 +163,9 @@ export const App: React.FC = () => {
 
   return (
     <LiveProvider>
-      <Shell baseRoute={baseRoute} navigate={navigate} />
+      <TemperatureUnitProvider>
+        <Shell baseRoute={baseRoute} navigate={navigate} />
+      </TemperatureUnitProvider>
     </LiveProvider>
   );
 };

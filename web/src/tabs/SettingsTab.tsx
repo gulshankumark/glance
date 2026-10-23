@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, getBlob, TOO_MANY_ATTEMPTS } from '../api/client';
 import type { AuthState, Settings } from '../api/types';
+import { useSetTemperatureUnit } from '../live/TemperatureUnit';
 import { isLoopbackHost, serviceAddress } from '../lib/serviceAddress';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
@@ -76,6 +77,7 @@ const DisplaySection: React.FC<{ settings: Settings; onSaved: (s: Settings) => v
   const stored = settings.maxOverlayAnimationFps;
   const isPreset = stored === null || FPS_PRESETS.includes(stored);
   const [unit, setUnit] = useState(settings.unit);
+  const setTemperatureUnit = useSetTemperatureUnit();
   const [clock24h, setClock24h] = useState(settings.clock24h);
   const [fpsChoice, setFpsChoice] = useState(stored === null ? 'off' : isPreset ? String(stored) : 'custom');
   const [customFps, setCustomFps] = useState(isPreset ? '' : String(stored));
@@ -107,7 +109,9 @@ const DisplaySection: React.FC<{ settings: Settings; onSaved: (s: Settings) => v
     setCustomError(null);
     setSaving(true);
     try {
-      onSaved(await api<Settings>('PUT', '/api/settings', { unit, clock24h, maxOverlayAnimationFps: fps }));
+      const result = await api<Settings>('PUT', '/api/settings', { unit, clock24h, maxOverlayAnimationFps: fps });
+      setTemperatureUnit(result.unit);
+      onSaved(result);
       setSaved(true);
     } catch (err) {
       setError(errorText(err));
