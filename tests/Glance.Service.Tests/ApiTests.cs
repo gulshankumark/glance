@@ -319,6 +319,22 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task Sensors_list_shows_persisted_role_pins()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        var before = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.Empty(before.GetProperty("pins").EnumerateObject());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/roles/gpu.load", Json(new { sensorId = "cpu/t" }))).StatusCode);
+        var pinned = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.Equal("cpu/t", pinned.GetProperty("pins").GetProperty("gpu.load").GetString());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsync("/api/roles/gpu.load", Json(new { sensorId = (string?)null }))).StatusCode);
+        var after = await c.GetFromJsonAsync<JsonElement>("/api/sensors");
+        Assert.False(after.GetProperty("pins").TryGetProperty("gpu.load", out _));
+    }
+
+    [Fact]
     public async Task Preview_is_404_until_rendered_then_jpeg_no_store()
     {
         await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();

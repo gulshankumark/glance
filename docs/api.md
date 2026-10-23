@@ -71,6 +71,7 @@ Holds the UI-interest lease (every sensor is read while the UI is in use; see [U
      "kind": "temperature", "unit": "°C", "value": 61.0, "alias": "CPU die"}
   ],
   "roles": {"cpu.temperature": "/amdcpu/0/temperature/2", "gpu.load": null},
+  "pins": {"cpu.temperature": "/amdcpu/0/temperature/2"},
   "diagnostics": [{"code": "...", "message": "..."}]
 }
 ```
@@ -82,6 +83,7 @@ Holds the UI-interest lease (every sensor is read while the UI is in use; see [U
 - `roles`: every role (`cpu.temperature`, `cpu.load`, `cpu.clock`, `cpu.power.package`, `cpu.power.cores`, `cpu.fan`,
   `gpu.temperature`, `gpu.load`, `gpu.clock`, `gpu.memory.clock`, `gpu.memory.load`, `gpu.fan`, `gpu.power`,
   `memory.load`, `memory.used`) mapped to the sensor id it resolves to (pins applied) or `null`.
+- `pins`: the persisted role pins (`PUT /api/roles/{role}`) as role to sensor id; a role without a pin is absent (`{}` when none).
 
 ### PUT /api/sensors/alias
 
