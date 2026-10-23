@@ -49,48 +49,61 @@ const Slider: React.FC<SliderProps> = ({ label, value, min, max, step, shown, on
 
 /**
  * "Screen colour": gamma and brightness of the bytes sent to one connected screen, plus a test pattern to judge them.
- * Slider changes PUT after 150 ms without change; only the answer to the latest PUT counts. A failed PUT shows the
- * server error and restores the last saved values.
+ * Slider changes PUT the fields changed since the last PUT after 150 ms without change. Every successful answer newer
+ * than the last applied one is applied; a failure of the latest PUT shows the server error and restores the newest
+ * value the server confirmed.
  */
 export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: DeviceView) => void }> = ({
   device,
   onUpdated,
 }) => {
   const [values, setValues] = useState<Values>({ gamma: device.gamma, brightness: device.brightness });
-  const [error, setError] = useState<string | null>(null);
+  const [colourError, setColourError] = useState<string | null>(null);
+  const [patternError, setPatternError] = useState<string | null>(null);
   const [patternOn, setPatternOn] = useState(false);
 
   const key = useRef(device.key);
   const onUpdatedRef = useRef(onUpdated);
   onUpdatedRef.current = onUpdated;
-  const saved = useRef<Values>({ gamma: device.gamma, brightness: device.brightness });
-  const pending = useRef<Values | null>(null);
+  /** The newest values the server confirmed (a PUT answer, or a device push while idle). */
+  const confirmed = useRef<Values>({ gamma: device.gamma, brightness: device.brightness });
+  /** Fields changed since the last PUT, waiting for the debounce. */
+  const pending = useRef<Partial<Values> | null>(null);
   const debounce = useRef<number | undefined>(undefined);
   const sent = useRef(0);
+  const applied = useRef(0);
   const inFlight = useRef(0);
   const patternTimer = useRef<number | undefined>(undefined);
   const patternState = useRef({ on: false, busy: false, unmounted: false });
 
-  // Adopt values changed elsewhere (live pushes, other browsers) while none of ours is pending.
+  // Adopt values changed elsewhere (device pushes, other browsers) only while none of ours is pending or in flight,
+  // so a push never moves a slider under the user. Pushes carry no version: a push older than our newest answer that
+  // arrives once idle would be shown, but the service pushes after every change, so the newer push follows it.
   useEffect(() => {
-    saved.current = { gamma: device.gamma, brightness: device.brightness };
-    if (pending.current === null && inFlight.current === 0) setValues(saved.current);
+    if (pending.current !== null || inFlight.current > 0) return;
+    confirmed.current = { gamma: device.gamma, brightness: device.brightness };
+    setValues(confirmed.current);
   }, [device.gamma, device.brightness]);
 
-  const send = async (v: Values) => {
+  const send = async (patch: DevicePatch) => {
     const seq = ++sent.current;
     inFlight.current++;
     try {
-      const patch: DevicePatch = v;
+      // Not useDeviceUpdate: that hook keeps errors in the layout/rotation slots and neither orders answers nor
+      // reports a failure, which this debounced, out-of-order-safe sender needs.
       const updated = await api<DeviceView>('PUT', `/api/devices/${encodeURIComponent(key.current)}`, patch);
-      if (seq !== sent.current) return;
-      saved.current = { gamma: updated.gamma, brightness: updated.brightness };
-      setError(null);
-      onUpdatedRef.current(updated);
+      if (seq > applied.current) {
+        applied.current = seq;
+        confirmed.current = { gamma: updated.gamma, brightness: updated.brightness };
+        // Nothing newer is waiting or under way (e.g. the latest PUT already failed): show what the server has.
+        if (pending.current === null && inFlight.current === 1) setValues(confirmed.current);
+        onUpdatedRef.current(updated);
+      }
+      if (seq === sent.current) setColourError(null);
     } catch (err) {
       if (seq !== sent.current) return;
-      setError(errorText(err, 'The change could not be saved.'));
-      if (pending.current === null) setValues(saved.current);
+      setColourError(errorText(err, 'The change could not be saved.'));
+      if (pending.current === null) setValues(confirmed.current);
     } finally {
       inFlight.current--;
     }
@@ -98,14 +111,25 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
   const sendRef = useRef(send);
   sendRef.current = send;
 
-  const change = (v: Values) => {
-    setValues(v);
-    pending.current = v;
+  const flushPending = () => {
     window.clearTimeout(debounce.current);
-    debounce.current = window.setTimeout(() => {
-      pending.current = null;
-      void sendRef.current(v);
-    }, DEBOUNCE_MS);
+    const patch = pending.current;
+    pending.current = null;
+    if (patch !== null) void sendRef.current(patch);
+  };
+
+  const change = (patch: Partial<Values>) => {
+    setValues((v) => ({ ...v, ...patch }));
+    pending.current = { ...pending.current, ...patch };
+    window.clearTimeout(debounce.current);
+    debounce.current = window.setTimeout(flushPending, DEBOUNCE_MS);
+  };
+
+  const showPattern = (on: boolean) => {
+    window.clearTimeout(patternTimer.current);
+    patternState.current.on = on;
+    setPatternOn(on);
+    if (on) patternTimer.current = window.setTimeout(() => showPattern(false), PATTERN_MS);
   };
 
   const togglePattern = async () => {
@@ -116,7 +140,7 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
     try {
       await setTestPattern(key.current, on);
     } catch (err) {
-      setError(errorText(err, 'The test pattern could not be changed.'));
+      if (!state.unmounted) setPatternError(errorText(err, 'The test pattern could not be changed.'));
       return;
     } finally {
       state.busy = false;
@@ -126,34 +150,28 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
       if (on) setTestPattern(key.current, false).catch(() => {});
       return;
     }
-    setError(null);
-    window.clearTimeout(patternTimer.current);
-    state.on = on;
-    setPatternOn(on);
-    if (on) {
-      patternTimer.current = window.setTimeout(() => {
-        state.on = false;
-        setPatternOn(false);
-      }, PATTERN_MS);
-    }
+    setPatternError(null);
+    showPattern(on);
   };
 
-  useEffect(
-    () => () => {
-      // Leaving the page: send a change still waiting for its debounce, and end a test pattern that is on.
-      window.clearTimeout(debounce.current);
+  useEffect(() => {
+    // Closing or leaving the page: end a test pattern that is on with a request that outlives the page.
+    const onPageHide = () => {
+      if (!patternState.current.on) return;
+      setTestPattern(key.current, false, { keepalive: true }).catch(() => {});
+      showPattern(false);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      // Leaving the tab: send a change still waiting for its debounce, and end a test pattern that is on.
+      flushPending();
       window.clearTimeout(patternTimer.current);
-      if (pending.current !== null) {
-        const v = pending.current;
-        pending.current = null;
-        void sendRef.current(v);
-      }
       const state = patternState.current;
       state.unmounted = true;
       if (state.on) setTestPattern(key.current, false).catch(() => {});
-    },
-    [],
-  );
+    };
+  }, []);
 
   return (
     <>
@@ -166,7 +184,7 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
           max={3}
           step={0.05}
           shown={values.gamma.toFixed(2)}
-          onChange={(gamma) => change({ ...values, gamma: Math.round(gamma * 100) / 100 })}
+          onChange={(gamma) => change({ gamma: Math.round(gamma * 100) / 100 })}
         />
         <Slider
           label="Brightness"
@@ -175,7 +193,7 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
           max={100}
           step={1}
           shown={`${values.brightness}%`}
-          onChange={(brightness) => change({ ...values, brightness: Math.round(brightness) })}
+          onChange={(brightness) => change({ brightness: Math.round(brightness) })}
         />
         <div className={styles.steps} data-testid="grey-steps" aria-hidden="true">
           {STEPS.map((v) => (
@@ -197,10 +215,15 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
             Show test pattern
           </Button>
         </div>
+        {patternError && (
+          <p className={styles.patternError} role="alert">
+            {patternError}
+          </p>
+        )}
       </fieldset>
-      {error && (
+      {colourError && (
         <p className={styles.error} role="alert">
-          {error}
+          {colourError}
         </p>
       )}
     </>

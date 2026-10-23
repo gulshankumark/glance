@@ -177,7 +177,7 @@ test.describe('Devices Tab', () => {
       ]);
       await expect(colour(page)).toContainText('1.05');
       const puts = api.calls.filter((c) => c.method === 'PUT' && c.path === `/api/devices/${KEY}`);
-      expect(puts.map((c) => c.body)).toEqual([{ gamma: 1.05, brightness: 100 }]);
+      expect(puts.map((c) => c.body)).toEqual([{ gamma: 1.05 }]);
 
       await page.keyboard.press('Tab');
       await expect(colour(page).getByLabel('Brightness')).toBeFocused();

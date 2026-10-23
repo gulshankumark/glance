@@ -13,6 +13,7 @@ interface Call {
   method: string;
   url: string;
   body: unknown;
+  keepalive?: boolean;
 }
 
 let calls: Call[];
@@ -28,7 +29,8 @@ beforeEach(() => {
   answer = (call) =>
     call.method === 'PUT' ? json(200, { ...device, ...(call.body as object) }) : new Response(null, { status: 204 });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-    const call = { method: init.method ?? 'GET', url, body: init.body ? JSON.parse(String(init.body)) : undefined };
+    const call: Call = { method: init.method ?? 'GET', url, body: init.body ? JSON.parse(String(init.body)) : undefined };
+    if (init.keepalive) call.keepalive = true;
     calls.push(call);
     return answer(call);
   });
@@ -64,7 +66,7 @@ describe('Calibration', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(150); });
     await flush();
 
-    expect(puts()).toEqual([{ method: 'PUT', url: '/api/devices/dev%201', body: { gamma: 2.25, brightness: 100 } }]);
+    expect(puts()).toEqual([{ method: 'PUT', url: '/api/devices/dev%201', body: { gamma: 2.25 } }]);
     expect(onUpdated).toHaveBeenCalledWith({ ...device, gamma: 2.25 });
   });
 
@@ -182,5 +184,167 @@ describe('Calibration', () => {
     expect((steps[0] as HTMLElement).style.backgroundColor).toBe('rgb(0, 0, 0)');
     expect((steps[1] as HTMLElement).style.backgroundColor).toBe('rgb(17, 17, 17)');
     expect((steps[15] as HTMLElement).style.backgroundColor).toBe('rgb(255, 255, 255)');
+  });
+
+  it('sends every field changed since the last PUT, and only those', async () => {
+    render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.change(gamma(), { target: { value: '1.4' } });
+    fireEvent.change(brightness(), { target: { value: '60' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    fireEvent.change(brightness(), { target: { value: '70' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    expect(puts().map((c) => c.body)).toEqual([{ gamma: 1.4, brightness: 60 }, { brightness: 70 }]);
+  });
+
+  it('a failed PUT restores the value an earlier PUT saved', async () => {
+    const onUpdated = vi.fn();
+    answer = (call) =>
+      (call.body as { gamma: number }).gamma === 1.5
+        ? json(200, { ...device, gamma: 1.5 })
+        : json(400, { error: 'gamma must be 0.5..3' });
+    render(<Calibration device={device} onUpdated={onUpdated} />);
+
+    fireEvent.change(gamma(), { target: { value: '1.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    fireEvent.change(gamma(), { target: { value: '2.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+
+    expect(onUpdated).toHaveBeenCalledWith({ ...device, gamma: 1.5 });
+    expect(gamma().value).toBe('1.5');
+    expect(screen.getByRole('alert').textContent).toBe('gamma must be 0.5..3');
+  });
+
+  it('applies an older successful answer that arrives before a newer failing one', async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    answer = () => new Promise<Response>((resolve) => resolvers.push(resolve));
+    const onUpdated = vi.fn();
+    render(<Calibration device={device} onUpdated={onUpdated} />);
+
+    fireEvent.change(gamma(), { target: { value: '1.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    fireEvent.change(gamma(), { target: { value: '2.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+
+    resolvers[0](json(200, { ...device, gamma: 1.5 }));
+    await flush();
+    expect(onUpdated).toHaveBeenCalledWith({ ...device, gamma: 1.5 });
+    expect(gamma().value).toBe('2.5');
+    resolvers[1](json(400, { error: 'no' }));
+    await flush();
+    expect(gamma().value).toBe('1.5');
+  });
+
+  it('shows an older successful answer that arrives after the newer PUT failed', async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    answer = () => new Promise<Response>((resolve) => resolvers.push(resolve));
+    render(<Calibration device={device} onUpdated={() => undefined} />);
+
+    fireEvent.change(gamma(), { target: { value: '1.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    fireEvent.change(gamma(), { target: { value: '2.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+
+    resolvers[1](json(400, { error: 'no' }));
+    await flush();
+    expect(gamma().value).toBe('1');
+    resolvers[0](json(200, { ...device, gamma: 1.5 }));
+    await flush();
+    expect(gamma().value).toBe('1.5');
+    expect(screen.getByRole('alert').textContent).toBe('no');
+  });
+
+  it('a device push does not move a slider while a change is pending, a later one does', async () => {
+    const { rerender } = render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.change(gamma(), { target: { value: '2' } });
+    rerender(<Calibration device={{ ...device, gamma: 1.3 }} onUpdated={() => undefined} />);
+    expect(gamma().value).toBe('2');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    expect(gamma().value).toBe('2');
+
+    rerender(<Calibration device={{ ...device, gamma: 2.7, brightness: 50 }} onUpdated={() => undefined} />);
+    expect(gamma().value).toBe('2.7');
+    expect(brightness().value).toBe('50');
+  });
+
+  it('a device push does not move a slider while a PUT is in flight', async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    answer = () => new Promise<Response>((resolve) => resolvers.push(resolve));
+    const { rerender } = render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.change(gamma(), { target: { value: '2' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    rerender(<Calibration device={{ ...device, gamma: 1.3 }} onUpdated={() => undefined} />);
+    expect(gamma().value).toBe('2');
+    resolvers[0](json(200, { ...device, gamma: 2 }));
+    await flush();
+    expect(gamma().value).toBe('2');
+  });
+
+  it('sends a change still waiting for its debounce on unmount', async () => {
+    const { unmount } = render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.change(gamma(), { target: { value: '1.8' } });
+    unmount();
+    await flush();
+    expect(puts().map((c) => c.body)).toEqual([{ gamma: 1.8 }]);
+  });
+
+  it('ends the pattern when its POST answers after unmount', async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    answer = (call) =>
+      call.method === 'POST'
+        ? new Promise<Response>((resolve) => resolvers.push(resolve))
+        : new Response(null, { status: 204 });
+    const { unmount } = render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show test pattern' }));
+    await flush();
+    unmount();
+    await flush();
+    expect(calls.map((c) => c.method)).toEqual(['POST']);
+    resolvers[0](new Response(null, { status: 204 }));
+    await flush();
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'DELETE']);
+  });
+
+  it('ends the pattern with a keepalive DELETE when the page is hidden for good', async () => {
+    render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent(window, new Event('pagehide'));
+    await flush();
+    expect(calls).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show test pattern' }));
+    await flush();
+    fireEvent(window, new Event('pagehide'));
+    await flush();
+    expect(calls[1]).toEqual({
+      method: 'DELETE',
+      url: '/api/devices/dev%201/test-pattern',
+      body: undefined,
+      keepalive: true,
+    });
+  });
+
+  it('keeps colour and test pattern errors apart', async () => {
+    answer = (call) =>
+      call.method === 'PUT' ? json(400, { error: 'gamma must be 0.5..3' }) : json(404, { error: 'unknown device' });
+    render(<Calibration device={device} onUpdated={() => undefined} />);
+    fireEvent.change(gamma(), { target: { value: '2.5' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Show test pattern' }));
+    await flush();
+    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['unknown device', 'gamma must be 0.5..3']);
+
+    // a later colour success clears only the colour error
+    answer = (call) =>
+      call.method === 'PUT' ? json(200, { ...device, gamma: 2 }) : json(404, { error: 'unknown device' });
+    fireEvent.change(gamma(), { target: { value: '2' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    await flush();
+    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['unknown device']);
   });
 });
