@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { DeviceView } from '../api/types';
 import { Calibration } from './Calibration';
@@ -139,6 +140,19 @@ describe('Calibration', () => {
     await flush();
     expect(calls.map((c) => c.method)).toEqual(['POST', 'DELETE']);
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('the test pattern toggle works under StrictMode (effects mounted twice in development)', async () => {
+    render(
+      <StrictMode>
+        <Calibration device={device} onUpdated={() => undefined} />
+      </StrictMode>,
+    );
+    const toggle = screen.getByRole('button', { name: 'Show test pattern' });
+    fireEvent.click(toggle);
+    await flush();
+    expect(calls.map((c) => c.method)).toEqual(['POST']);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('the test pattern toggle turns itself off after 120 s', async () => {

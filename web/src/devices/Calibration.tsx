@@ -155,6 +155,7 @@ export const Calibration: React.FC<{ device: DeviceView; onUpdated: (device: Dev
   };
 
   useEffect(() => {
+    patternState.current.unmounted = false;   // StrictMode re-runs this effect after a dev-only cleanup
     // Closing or leaving the page: end a test pattern that is on with a request that outlives the page.
     const onPageHide = () => {
       if (!patternState.current.on) return;
