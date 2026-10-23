@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { Asset, DeviceView, Item, Layout, LayoutSummary, SensorsResponse } from '../src/api/types';
+import type { Asset, DeviceView, Item, Layout, LayoutSummary, SensorsResponse, Settings } from '../src/api/types';
 
 export interface MockApiOptions {
   authenticated?: boolean;
@@ -33,6 +33,12 @@ export interface MockApiOptions {
   assetUploadFail?: boolean;
   /** Delay of each POST /api/assets answer in ms (default 0). */
   assetUploadDelayMs?: number;
+  /** Initial GET /api/settings values (hasPassword defaults to whether `password` is set). */
+  settings?: Partial<Settings>;
+  /** Ports PUT /api/settings/network cannot bind (answers 409). */
+  busyPorts?: number[];
+  /** While set, PUT /api/settings/password answers 429 with an empty body. */
+  passwordRateLimited?: boolean;
 }
 
 /** A POST /api/assets request as the mock received it. */
@@ -59,6 +65,8 @@ export interface MockApiHandle {
   assets: Asset[];
   /** Every POST /api/assets so far. */
   uploads: AssetUpload[];
+  /** The stored settings (as GET /api/settings answers them). */
+  settings: Settings;
   /** The highest number of POST /api/render fetches the page had pending (not answered, not aborted) at once. */
   maxRendersInFlight: () => Promise<number>;
 }
@@ -169,6 +177,16 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
   const renders: Layout[] = [];
   const assets: Asset[] = options.assets ? [...options.assets] : seedAssets();
   const uploads: AssetUpload[] = [];
+  const settings: Settings = {
+    unit: 'celsius',
+    clock24h: true,
+    maxOverlayAnimationFps: null,
+    port: 8735,
+    networkAccess: !!opts.networkAccess,
+    https: false,
+    hasPassword: !!opts.password,
+    ...options.settings,
+  };
 
   const defaultSensors: SensorsResponse = options.sensors ?? {
     sensors: [
@@ -557,6 +575,64 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path.startsWith('/api/settings') || path === '/api/logs' || path === '/api/auth/logout') {
+      const json = (status: number, data?: unknown) =>
+        route.fulfill({ status, contentType: 'application/json', body: data === undefined ? '' : JSON.stringify(data) });
+      if (path === '/api/settings' && method === 'GET') return json(200, settings);
+      if (path === '/api/settings' && method === 'PUT') {
+        const patch = body as Partial<Settings>;
+        if (patch.unit !== undefined && patch.unit !== 'celsius' && patch.unit !== 'fahrenheit') {
+          return json(400, { error: 'unknown unit' });
+        }
+        const fps = patch.maxOverlayAnimationFps;
+        if (fps !== undefined && fps !== null && (!Number.isInteger(fps) || fps < 1 || fps > 60)) {
+          return json(400, { error: 'maxOverlayAnimationFps must be 1..60 or null' });
+        }
+        if (patch.unit !== undefined) settings.unit = patch.unit;
+        if (patch.clock24h !== undefined) settings.clock24h = patch.clock24h;
+        if (fps !== undefined) settings.maxOverlayAnimationFps = fps;
+        return json(200, settings);
+      }
+      if (path === '/api/settings/password' && method === 'PUT') {
+        if (opts.passwordRateLimited) return route.fulfill({ status: 429, body: '' });
+        const { current, new: next } = body as { current?: string; new?: string };
+        if (!next || next.length < 8) return json(400, { error: 'password must be at least 8 characters' });
+        if (settings.hasPassword && !current) return json(400, { error: 'current password required' });
+        if (settings.hasPassword && current !== opts.password) return json(403, { error: 'current password is wrong' });
+        opts.password = next;
+        settings.hasPassword = true;
+        return json(200, { hasPassword: true });
+      }
+      if (path === '/api/settings/network' && method === 'PUT') {
+        const { enabled, https, port } = body as { enabled?: boolean; https?: boolean; port?: number };
+        if (enabled === undefined) return json(400, { error: 'enabled is required' });
+        if (port !== undefined && (!Number.isInteger(port) || port < 1024 || port > 65535)) {
+          return json(400, { error: 'port must be 1024..65535' });
+        }
+        if (enabled && !settings.hasPassword) return json(400, { error: 'set a password before enabling network access' });
+        if (port !== undefined && port !== settings.port && opts.busyPorts?.includes(port)) {
+          return json(409, { error: `port ${port} is in use by another program` });
+        }
+        settings.networkAccess = enabled;
+        if (https !== undefined) settings.https = https;
+        if (port !== undefined) settings.port = port;
+        return json(200, { networkAccess: settings.networkAccess, https: settings.https, port: settings.port });
+      }
+      if (path === '/api/logs' && method === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/zip',
+          headers: { 'Content-Disposition': 'attachment; filename=glance-logs.zip' },
+          // An empty zip archive (end-of-central-directory record only).
+          body: Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]),
+        });
+      }
+      if (path === '/api/auth/logout' && method === 'POST') {
+        opts.authenticated = false;
+        return route.fulfill({ status: 204, body: '' });
+      }
+    }
+
     if (path === '/api/health') {
       await route.fulfill({
         status: 200,
@@ -581,6 +657,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     layouts,
     assets,
     uploads,
+    settings,
     renders: () => [...renders],
     maxRendersInFlight: () =>
       page.evaluate(() => (window as unknown as { __maxRendersInFlight: number }).__maxRendersInFlight),
