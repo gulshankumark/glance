@@ -83,12 +83,16 @@ Run this after a release publish (`dotnet publish` to `artifacts/run`) with the 
 
 ### UI results
 
-Date: ______  Build: ______
+Date: 2026-10-23  Build: feat/web-ui d9dc64b (first pass), 43661f8 (re-check after fixes)
+Hardware: 0416:5302 1280x480 (rotation 180), Ryzen 9 9950X (32 logical CPUs), Windows 11.
 
 | Check | Result |
 |---|---|
-| Every tab, mouse | ______ |
-| Every tab, keyboard only | ______ |
-| Layout built by dragging GPU temperature, saved, made active, screen updates | ______ |
-| Network access + password, phone login and every tab | ______ |
-| CPU with the UI open (informational) | ______ % |
+| Every tab, mouse | Pass. First pass: the Layouts preview and the screen looked misaligned. Measured: item positions match within ~1 % (render vs photo vs editor); the cause was hand-placed items (x 31–38 px, rows 31–35 px apart) and the panel showing dark/translucent colours much brighter and bluer. Fixed by alignment tools (multi-select, snapping, align/distribute) and per-screen colour calibration; re-check: pass |
+| Every tab, keyboard only | Pass. First pass: tab-bar focus ring clipped (top/bottom, outer edge of first/last tab) by the scrolling nav; fixed (2efa29d); re-check: pass |
+| Layout built by dragging GPU temperature, saved, made active, screen updates | Pass, almost immediate |
+| Temperature unit °F on screen and in the UI | Pass, both switch live |
+| Network access + password, phone login and every tab | Pass |
+| Alignment tools on layout "Plain" (Shift+click, Align left, Distribute vertically, snapping with guides) | Pass |
+| Colour calibration with the test pattern | Pass; owner settled on gamma 1.35, brightness 100 % |
+| CPU with the UI open (informational) | Animated layout with sensors: 12.1 % of one core at the 60 fps cap; 6.7 % at a 12 fps cap with the UI open; 5.9 % at 12 fps with the UI closed (one core; 0.18–0.38 % of all 32 logical CPUs). ~198 MB |
