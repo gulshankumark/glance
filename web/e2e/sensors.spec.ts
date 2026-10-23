@@ -18,6 +18,7 @@ test.describe('Sensors tab', () => {
     const sensors: SensorsResponse = {
       sensors: [],
       roles: {},
+      pins: {},
       diagnostics: [{ code: 'driver', message: 'The sensor driver is not loaded <b>bold</b>' }],
     };
     await mockApi(page, { sensors });

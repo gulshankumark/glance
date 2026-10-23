@@ -57,7 +57,7 @@ export interface SensorsResponse {
   sensors: Sensor[];
   roles: Record<string, string | null>;
   /** Persisted role pins (role to sensor id); absent roles are automatic. */
-  pins?: Record<string, string>;
+  pins: Record<string, string>;
   diagnostics: Array<{ code: string; message: string }>;
 }
 

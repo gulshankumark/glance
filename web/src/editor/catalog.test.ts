@@ -9,6 +9,7 @@ const catalog: SensorsResponse = {
     { id: 'mb/f', hardware: 'Board', hardwareKind: 'motherboard', name: 'Fan #1', kind: 'fan', unit: 'RPM', value: null, alias: null },
   ],
   roles: { 'cpu.temperature': 'cpu/t', 'gpu.load': null },
+  pins: {},
   diagnostics: [],
 };
 

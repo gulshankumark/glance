@@ -34,6 +34,7 @@ const htmlSensors: SensorsResponse = {
     { id: 'cpu/t', hardware: 'Ryzen <i>X</i>', hardwareKind: 'cpu', name: 'CPU Package', kind: 'temperature', unit: '°C', value: 55, alias: htmlAlias },
   ],
   roles: { 'cpu.temperature': 'cpu/t' },
+  pins: {},
   diagnostics: [],
 };
 

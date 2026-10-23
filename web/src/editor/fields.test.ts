@@ -57,6 +57,7 @@ describe('describeItem', () => {
   const catalog: SensorsResponse = {
     sensors: [{ id: 'gpu/l', hardware: 'Arc', hardwareKind: 'gpu', name: 'GPU Core', kind: 'load', unit: '%', value: 1, alias: null }],
     roles: {},
+    pins: {},
     diagnostics: [],
   };
 

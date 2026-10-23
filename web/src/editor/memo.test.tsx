@@ -8,6 +8,7 @@ import { useDirty } from './useDirty';
 const catalog: SensorsResponse = {
   sensors: [{ id: 'a', hardware: 'H', hardwareKind: 'cpu', name: 'A', kind: 'load', unit: '%', value: 1, alias: null }],
   roles: { 'cpu.load': 'a' },
+  pins: {},
   diagnostics: [],
 };
 

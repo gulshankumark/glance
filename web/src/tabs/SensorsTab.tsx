@@ -181,7 +181,7 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
             return (
               <div key={role}>
                 <Field label={roleLabel(role)} error={roleErrors[role] || undefined}>
-                  <Select value={data.pins?.[role] ?? ''} onChange={(e) => void pinRole(role, e.target.value)}>
+                  <Select value={data.pins[role] ?? ''} onChange={(e) => void pinRole(role, e.target.value)}>
                     <option value="">Automatic</option>
                     {data.sensors.map((s) => (
                       <option key={s.id} value={s.id}>
