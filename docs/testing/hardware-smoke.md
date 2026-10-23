@@ -67,3 +67,28 @@ Also observed:
 - An imported .zt needs `ztRotation=180` on this unit.
 
 Benchmark tool: `dotnet run -c Release --project tools/Glance.Bench -- [stages|session|encode|all] [seconds] [--cap N]`
+
+## Web UI
+
+Run this after a release publish (`dotnet publish` to `artifacts/run`) with the service restarted.
+
+1. Open `http://localhost:8735` on the computer running Glance.
+2. Walk every tab (Display, Layouts, Sensors, Devices, Settings) with the mouse, then once with the keyboard only
+   (Tab, Enter, Escape): every control is reachable and shows a focus ring.
+3. Layouts: start a new layout, drag "GPU temperature" from the sensor tree onto the canvas, save it, make it active.
+   The screen shows it within a few seconds.
+4. Settings: turn on network access and set a password. On a phone on the same network open
+   `http://<computer address>:8735`, log in, and walk every tab (no sideways scrolling; canvas items can be tapped).
+5. Measure CPU as above with the UI open on the Display tab (informational).
+
+### UI results
+
+Date: ______  Build: ______
+
+| Check | Result |
+|---|---|
+| Every tab, mouse | ______ |
+| Every tab, keyboard only | ______ |
+| Layout built by dragging GPU temperature, saved, made active, screen updates | ______ |
+| Network access + password, phone login and every tab | ______ |
+| CPU with the UI open (informational) | ______ % |
