@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { getBlob } from '../api/client';
 import type { DeviceView, LayoutSummary, Rotation } from '../api/types';
 import { useDeviceList } from '../devices/useDeviceList';
-import { LayoutSelect, useDeviceUpdate } from '../devices/DeviceControls';
+import { LayoutSelect, ROTATIONS, useDeviceUpdate } from '../devices/DeviceControls';
 import { formatNextRetry, formatValue } from '../lib/format';
 import { LiveValue } from '../live/LiveValue';
 import { Button } from '../ui/Button';
@@ -10,7 +10,6 @@ import { Card } from '../ui/Card';
 import styles from './DisplayTab.module.css';
 
 const PREVIEW_INTERVAL_MS = 1000;
-const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 
 const previewPath = (key: string, t: number) => `/api/preview/${encodeURIComponent(key)}.jpg?t=${t}`;
 
@@ -79,7 +78,7 @@ interface DeviceCardProps {
 
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, navigate, onUpdated }) => {
   const rotationLabelId = useId();
-  const { update, error } = useDeviceUpdate(device, onUpdated);
+  const { update, layoutError, rotationError } = useDeviceUpdate(device, onUpdated);
 
   return (
     <Card data-testid={`device-card-${device.key}`} title={device.name}>
@@ -131,7 +130,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
       )}
 
       <div className={styles.controlsRow}>
-        <LayoutSelect device={device} layouts={layouts} onChange={(activeLayout) => update({ activeLayout })} error={error ?? undefined} />
+        <LayoutSelect device={device} layouts={layouts} onChange={(activeLayout) => update({ activeLayout })} error={layoutError ?? undefined} />
 
         <div>
           <div id={rotationLabelId} className={styles.groupLabel}>
@@ -152,6 +151,11 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
               </Button>
             ))}
           </div>
+          {rotationError && (
+            <p role="alert" style={{ marginTop: 'var(--space-1)', fontSize: '0.8rem', color: 'var(--danger)' }}>
+              {rotationError}
+            </p>
+          )}
         </div>
       </div>
     </Card>

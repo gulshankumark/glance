@@ -1,12 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
-import fs from 'node:fs';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { mockApi, seedDevice } from './mockApi';
-
-test.beforeEach(async () => {
-  if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
-    test.skip(true, 'Microsoft Edge is required for UI tests but is not installed.');
-  }
-});
 
 const card = (page: Page) => page.getByTestId('device-card-thermalright-hid-5302_SER1');
 const preview = (page: Page) => card(page).getByTestId('device-preview');
@@ -54,6 +48,15 @@ test.describe('Display Tab', () => {
     const putCall = api.calls.find((c) => c.method === 'PUT' && c.path === '/api/devices/thermalright-hid-5302_SER1');
     expect(putCall?.body).toEqual({ activeLayout: 'Gaming' });
     await expect(select).toHaveValue('Gaming');
+  });
+
+  test('a failed rotation PUT shows an alert next to the rotation buttons', async ({ page }) => {
+    await mockApi(page, { deviceWriteError: 'Rotation rejected' });
+    await page.goto('/#display');
+
+    await page.getByRole('button', { name: '90°', exact: true }).click();
+    await expect(card(page).getByRole('alert')).toContainText('Rotation rejected');
+    await expect(page.getByRole('group', { name: 'Rotation' }).locator('xpath=..').getByRole('alert')).toBeVisible();
   });
 
   test('Flip 180° PUTs rotation', async ({ page }) => {

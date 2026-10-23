@@ -1,12 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
-import fs from 'node:fs';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { mockApi, seedDevice } from './mockApi';
-
-test.beforeEach(async () => {
-  if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
-    test.skip(true, 'Microsoft Edge is required for UI tests but is not installed.');
-  }
-});
 
 const KEY = 'thermalright-hid-5302_SER1';
 const card = (page: Page, key = KEY) => page.getByTestId(`device-card-${key}`);
@@ -107,6 +101,9 @@ test.describe('Devices Tab', () => {
     await card(page).getByLabel('Rotation').selectOption('90');
     await expect(card(page).getByRole('alert')).toContainText('Layout "Gaming" is gone');
     await expect(card(page).getByLabel('Rotation')).toHaveValue('0');
+    // the alert belongs to the rotation control, not the layout one
+    await expect(card(page).getByLabel('Rotation')).toHaveAccessibleDescription('Layout "Gaming" is gone');
+    await expect(card(page).getByLabel('Active layout')).not.toHaveAttribute('aria-invalid', 'true');
   });
 
   test('live pushes update the list and the page fits 360 px', async ({ page }) => {

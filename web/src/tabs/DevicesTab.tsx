@@ -1,14 +1,12 @@
 import React from 'react';
 import type { DeviceView, LayoutSummary, Rotation } from '../api/types';
-import { LayoutSelect, useDeviceUpdate } from '../devices/DeviceControls';
+import { LayoutSelect, ROTATIONS, useDeviceUpdate } from '../devices/DeviceControls';
 import { useDeviceList } from '../devices/useDeviceList';
 import { formatNextRetry } from '../lib/format';
 import { Card } from '../ui/Card';
 import { Field } from '../ui/Field';
 import { Select } from '../ui/Select';
 import styles from './DevicesTab.module.css';
-
-const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 
 interface DeviceEntryProps {
   device: DeviceView;
@@ -17,7 +15,7 @@ interface DeviceEntryProps {
 }
 
 const DeviceEntry: React.FC<DeviceEntryProps> = ({ device, layouts, onUpdated }) => {
-  const { update, error } = useDeviceUpdate(device, onUpdated);
+  const { update, layoutError, rotationError } = useDeviceUpdate(device, onUpdated);
   const retryAt = formatNextRetry(device.nextRetry);
 
   return (
@@ -58,9 +56,9 @@ const DeviceEntry: React.FC<DeviceEntryProps> = ({ device, layouts, onUpdated })
             device={device}
             layouts={layouts}
             onChange={(activeLayout) => update({ activeLayout })}
-            error={error ?? undefined}
+            error={layoutError ?? undefined}
           />
-          <Field label="Rotation">
+          <Field label="Rotation" error={rotationError ?? undefined}>
             <Select
               value={String(device.rotation)}
               onChange={(e) => update({ rotation: Number(e.target.value) as Rotation })}
