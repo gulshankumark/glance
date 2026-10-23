@@ -280,11 +280,14 @@ public sealed class DisplaySession
             throw;
         }
         SetPreview(image);
+        var until = Interlocked.Read(ref _testPatternUntil);
         for (var left = TestPatternLeft(); left > TimeSpan.Zero; left = TestPatternLeft())
         {
             await SendAsync(frame, runCt);
             await WaitAsync(left < KeepAlive ? left : KeepAlive, planCt);
         }
+        // Expired on its own: clear it (unless a new deadline was set meanwhile) so a later stop changes nothing.
+        Interlocked.CompareExchange(ref _testPatternUntil, 0, until);
     }
 
     /// <summary>
@@ -502,17 +505,21 @@ public sealed class DisplaySession
     {
         if (layoutImage.Width == cw && layoutImage.Height == ch) return EncodeForDevice(layoutImage, rotation);
         using var fitted = Orientation.FitToCanvas(layoutImage, cw, ch);
-        return EncodeForDevice(fitted, rotation);
+        return EncodeForDevice(fitted, rotation, scratch: true);
     }
 
     /// <summary>
-    /// Rotates and calibrates a canvas-size image into device bytes. <paramref name="canvasImage"/> may be the preview,
-    /// so it is never changed: calibration works on the rotated copy, or on a copy of its own at rotation 0.
+    /// Rotates and calibrates a canvas-size image into device bytes. Unless it is <paramref name="scratch"/> (a private
+    /// temporary), <paramref name="canvasImage"/> may be the preview and is never changed: calibration works on the
+    /// rotated copy, or on a copy of its own at rotation 0.
     /// </summary>
-    private EncodedFrame EncodeForDevice(SKBitmap canvasImage, int rotation)
+    private EncodedFrame EncodeForDevice(SKBitmap canvasImage, int rotation, bool scratch = false)
     {
-        if (rotation == 0 && _calibration is null)
+        if (rotation == 0 && (_calibration is null || scratch))
+        {
+            _calibration?.Apply(canvasImage);
             return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, JpegEncoder.Encode(canvasImage, codec: _codec).Data);
+        }
         using var device = rotation == 0 ? canvasImage.Copy() : Orientation.ToDevice(canvasImage, rotation);
         _calibration?.Apply(device);
         return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, JpegEncoder.Encode(device, codec: _codec).Data);

@@ -446,6 +446,20 @@ public class DisplaySessionTests
     }
 
     [Fact]
+    public async Task Calibration_applies_to_a_layout_fitted_into_the_canvas()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill.Replace("\"width\":1280,\"height\":480", "\"width\":640,\"height\":240"));
+        Calibrate(h, 2.2);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        Assert.InRange(SentGrey(h), 50, 62);
+        using var p = SKBitmap.Decode(h.Session.GetPreviewJpeg());
+        Assert.Equal((640, 240), (p.Width, p.Height));
+        Assert.InRange((int)p.GetPixel(320, 200).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
     public async Task Calibration_change_applies_to_the_next_frame_without_reconnecting()
     {
         using var h = new SessionHarness(layoutJson: GreyStill);
@@ -533,6 +547,39 @@ public class DisplaySessionTests
         await h.Advance(TimeSpan.FromMilliseconds(200));
         Assert.InRange(SentGrey(h), 124, 132);                            // back to the layout
         Assert.InRange(PixelOf(h.Conn.Frames[^1], 5, 5).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Showing_the_test_pattern_again_extends_it()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(3));            // until 3010 ms
+        await h.Advance(TimeSpan.FromMilliseconds(2000));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(3));            // until 5010 ms
+        await h.Advance(TimeSpan.FromMilliseconds(2900));
+        Assert.True(IsBlack(PixelOf(h.Conn.Frames[^1], 5, 5)));       // past the first deadline: still the pattern
+        await h.Advance(TimeSpan.FromMilliseconds(200));
+        Assert.InRange(PixelOf(h.Conn.Frames[^1], 5, 5).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Stopping_an_expired_test_pattern_does_not_rebuild_the_frame_plan()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(1));
+        await h.Advance(TimeSpan.FromMilliseconds(1100));                // expired on its own; the layout is back
+        var renders = h.RenderCount;
+        var sent = h.Conn.Frames.Count;
+        h.Session.StopTestPattern();
+        await h.Advance(TimeSpan.FromMilliseconds(5));
+        Assert.Equal(renders, h.RenderCount);
+        Assert.Equal(sent, h.Conn.Frames.Count);                        // no immediate re-send from a new plan
         await h.Stop(run);
     }
 

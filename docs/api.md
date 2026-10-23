@@ -200,7 +200,7 @@ then label. Every id is valid as a clock item's `timeZone`.
 - `layoutMismatch`: the active layout's size differs from the rotated canvas (width/height swapped for 90 and 270).
 - `fps`: frames sent per second over the last 5 s; `framesSent`: frames since the session started. Both 0 without a
   running session.
-- `gamma` (0.5–3, default 1.0) and `brightness` (10–100 %, default 100): colour calibration of the bytes sent to that
+- `gamma` (0.5–3, default 1.0) and `brightness` (a whole number 10–100, in %, default 100): colour calibration of the bytes sent to that
   screen. Each colour channel v becomes `round(255 · brightness/100 · (v/255)^gamma)`; gamma above 1 darkens dark
   tones. It applies only to frames sent to the device (still, fallback, animated, passthrough and test pattern), never
   to `/api/preview/{key}.jpg`, `/api/render` or the editor, which match a normal monitor. The defaults skip the pass.

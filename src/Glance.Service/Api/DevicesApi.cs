@@ -12,9 +12,14 @@ public static class DevicesApi
     public static readonly TimeSpan TestPatternDuration = TimeSpan.FromSeconds(120);
 
     /// <param name="ActiveLayout">Absent: unchanged; null: cleared; a string: the name of an existing layout.</param>
-    /// <param name="Gamma">"NaN" and "Infinity" strings are read, so they get the range error rather than a bare 400.</param>
+    /// <param name="Gamma">
+    /// Numbers in strings are read like the other fields' (web defaults); "NaN" and "Infinity" are read too, so they get
+    /// the range error rather than a bare 400.
+    /// </param>
     public sealed record DevicePatch(int? Rotation, JsonElement ActiveLayout,
-        [property: JsonNumberHandling(JsonNumberHandling.AllowNamedFloatingPointLiterals)] double? Gamma, int? Brightness);
+        [property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.AllowNamedFloatingPointLiterals)]
+        double? Gamma,
+        int? Brightness);
 
     public sealed record DeviceView(string Key, string DriverId, string Name, DeviceStatus Status, int Width, int Height,
         string ModelCode, string Serial, string? Message, DateTimeOffset? NextRetry,

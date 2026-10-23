@@ -28,8 +28,13 @@ public sealed class ColorCalibration
     public int Brightness { get; }
 
     /// <summary>The calibration, or null for the identity (gamma 1, brightness 100), so callers skip the pass.</summary>
-    public static ColorCalibration? For(double gamma, int brightness) =>
-        gamma == 1 && brightness == 100 ? null : new ColorCalibration(gamma, brightness);
+    /// <exception cref="PlatformNotSupportedException">On a big-endian machine, where <see cref="Apply(Span{byte})"/> would change alpha.</exception>
+    public static ColorCalibration? For(double gamma, int brightness)
+    {
+        if (gamma == 1 && brightness == 100) return null;
+        if (!BitConverter.IsLittleEndian) throw new PlatformNotSupportedException("colour calibration needs a little-endian machine");
+        return new ColorCalibration(gamma, brightness);
+    }
 
     /// <summary>Maps the B, G and R bytes of every 4-byte BGRA (or RGBA) pixel in place; alpha is left as it is.</summary>
     public void Apply(Span<byte> bgra)
