@@ -1,13 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
-import fs from 'node:fs';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { mockApi, type MockApiHandle } from './mockApi';
 import type { Item, Layout, SensorsResponse } from '../src/api/types';
-
-test.beforeEach(async () => {
-  if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
-    test.skip(true, 'Microsoft Edge is required for UI tests but is not installed.');
-  }
-});
 
 const canvas = (page: Page) => page.getByTestId('layout-canvas');
 const tree = (page: Page) => page.getByTestId('sensor-tree');

@@ -1,12 +1,5 @@
-import { test, expect } from '@playwright/test';
-import fs from 'node:fs';
+import { test, expect } from './fixtures';
 import { mockApi } from './mockApi';
-
-test.beforeEach(async () => {
-  if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
-    test.skip(true, 'Microsoft Edge is required for UI tests but is not installed.');
-  }
-});
 
 test.describe('App Shell', () => {
   test('tabs switch by hash and highlight active', async ({ page }) => {

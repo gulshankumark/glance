@@ -1,12 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
-import fs from 'node:fs';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { mockApi } from './mockApi';
-
-test.beforeEach(async () => {
-  if (process.platform === 'win32' && !fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')) {
-    test.skip(true, 'Microsoft Edge is required for UI tests but is not installed.');
-  }
-});
 
 const section = (page: Page, name: string) => page.getByRole('region', { name });
 const fpsSelect = (page: Page) => page.getByLabel('Frame-rate cap for animations with text or gauges');
