@@ -413,6 +413,202 @@ public class DisplaySessionTests
         await h.Stop(run);
     }
 
+    private const string GreyStill =
+        """{"name":"L","width":1280,"height":480,"background":{"type":"color","color":"#808080"},"items":[]}""";
+
+    private static void Calibrate(SessionHarness h, double gamma, int brightness = 100) =>
+        h.Settings.Update(s => { s.Devices[h.Conn.Info.Key].Gamma = gamma; s.Devices[h.Conn.Info.Key].Brightness = brightness; });
+
+    private static int SentGrey(SessionHarness h, int index = -1)
+    {
+        using var dev = SKBitmap.Decode(h.Conn.Frames[index < 0 ? h.Conn.Frames.Count + index : index].Data.ToArray());
+        return dev.GetPixel(640, 400).Red;
+    }
+
+    [Theory] [InlineData(0)] [InlineData(180)]
+    public async Task Calibration_darkens_the_sent_still_frame_but_not_the_preview(int rotation)
+    {
+        async Task<(int Grey, byte[] Preview)> Run(double gamma)
+        {
+            using var h = new SessionHarness(layoutJson: GreyStill, rotation: rotation);
+            Calibrate(h, gamma);
+            var run = h.Start();
+            await h.Advance(TimeSpan.FromMilliseconds(10));
+            var result = (SentGrey(h), h.Session.GetPreviewJpeg()!);
+            await h.Stop(run);
+            return result;
+        }
+        var plain = await Run(1);
+        var calibrated = await Run(2.2);
+        Assert.InRange(plain.Grey, 124, 132);
+        Assert.InRange(calibrated.Grey, 50, 62);    // round(255 * (128/255)^2.2) = 56
+        Assert.Equal(plain.Preview, calibrated.Preview);
+    }
+
+    [Fact]
+    public async Task Calibration_applies_to_a_layout_fitted_into_the_canvas()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill.Replace("\"width\":1280,\"height\":480", "\"width\":640,\"height\":240"));
+        Calibrate(h, 2.2);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        Assert.InRange(SentGrey(h), 50, 62);
+        using var p = SKBitmap.Decode(h.Session.GetPreviewJpeg());
+        Assert.Equal((640, 240), (p.Width, p.Height));
+        Assert.InRange((int)p.GetPixel(320, 200).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Calibration_change_applies_to_the_next_frame_without_reconnecting()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        Assert.InRange(SentGrey(h), 124, 132);
+        var preview = h.Session.GetPreviewJpeg();
+        Calibrate(h, 1, brightness: 50);
+        await h.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.InRange(SentGrey(h), 60, 68);
+        Assert.Equal(preview, h.Session.GetPreviewJpeg());
+        Assert.False(run.IsCompleted);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Passthrough_frames_are_rebuilt_when_the_calibration_changes()
+    {
+        var anim = new Animation(1280, 480, new[] { GrayJpeg(128) }, new[] { 100 });
+        using var h = new SessionHarness(layoutJson: AnimationOnly, animation: anim);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.Equal(anim.JpegFrames[0], h.Conn.Frames[^1].Data.ToArray());   // identity: the stored bytes as they are
+        Calibrate(h, 2.2);
+        await h.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.InRange(SentGrey(h), 50, 62);
+        Calibrate(h, 1, brightness: 50);
+        await h.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.InRange(SentGrey(h), 60, 68);
+        Assert.Equal(anim.JpegFrames[0], h.Session.GetPreviewJpeg());
+        Calibrate(h, 1);
+        await h.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.Equal(anim.JpegFrames[0], h.Conn.Frames[^1].Data.ToArray());
+        await h.Stop(run);
+    }
+
+    [Theory] [InlineData(0)] [InlineData(180)]
+    public async Task Calibration_applies_to_animated_frames_with_an_overlay(int rotation)
+    {
+        var anim = new Animation(1280, 480, new[] { GrayJpeg(128) }, new[] { 100 });
+        using var h = new SessionHarness(layoutJson: AnimationWithSensor, animation: anim, rotation: rotation);
+        h.Values["cpu/t"] = 50;
+        Calibrate(h, 2.2);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.InRange(SentGrey(h), 50, 62);
+        using var p = SKBitmap.Decode(h.Session.GetPreviewJpeg());
+        Assert.InRange((int)p.GetPixel(640, 400).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Fallback_screen_is_calibrated_too()
+    {
+        using var h = new SessionHarness(layoutJson: null);
+        Calibrate(h, 1, brightness: 10);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        using var dev = SKBitmap.Decode(h.Conn.Frames[^1].Data.ToArray());
+        Assert.False(HasBrightPixel(dev, 0, 0, 1280, 480));   // the white message is dimmed to ~10 %
+        using var p = SKBitmap.Decode(h.Session.GetPreviewJpeg());
+        Assert.True(HasBrightPixel(p, 0, 0, 1280, 480));
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Test_pattern_shows_for_its_duration_then_the_layout_returns()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        var renders = h.Conn.Frames.Count;
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(3));
+        await h.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(renders + 1, h.Conn.Frames.Count);
+        using (var dev = SKBitmap.Decode(h.Conn.Frames[^1].Data.ToArray()))
+        {
+            Assert.True(IsBlack(dev.GetPixel(5, 5)));                       // first grey step
+            Assert.True(dev.GetPixel(1274, 5) is { Red: > 240, Green: > 240, Blue: > 240 });   // last grey step
+        }
+        using (var p = SKBitmap.Decode(h.Session.GetPreviewJpeg()))
+            Assert.True(IsBlack(p.GetPixel(5, 5)));
+        await h.Advance(TimeSpan.FromMilliseconds(2900));
+        Assert.True(IsBlack(PixelOf(h.Conn.Frames[^1], 5, 5)));          // still the pattern, kept alive
+        await h.Advance(TimeSpan.FromMilliseconds(200));
+        Assert.InRange(SentGrey(h), 124, 132);                            // back to the layout
+        Assert.InRange(PixelOf(h.Conn.Frames[^1], 5, 5).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Showing_the_test_pattern_again_extends_it()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(3));            // until 3010 ms
+        await h.Advance(TimeSpan.FromMilliseconds(2000));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(3));            // until 5010 ms
+        await h.Advance(TimeSpan.FromMilliseconds(2900));
+        Assert.True(IsBlack(PixelOf(h.Conn.Frames[^1], 5, 5)));       // past the first deadline: still the pattern
+        await h.Advance(TimeSpan.FromMilliseconds(200));
+        Assert.InRange(PixelOf(h.Conn.Frames[^1], 5, 5).Red, 124, 132);
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Stopping_an_expired_test_pattern_does_not_rebuild_the_frame_plan()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(1));
+        await h.Advance(TimeSpan.FromMilliseconds(1100));                // expired on its own; the layout is back
+        var renders = h.RenderCount;
+        var sent = h.Conn.Frames.Count;
+        h.Session.StopTestPattern();
+        await h.Advance(TimeSpan.FromMilliseconds(5));
+        Assert.Equal(renders, h.RenderCount);
+        Assert.Equal(sent, h.Conn.Frames.Count);                        // no immediate re-send from a new plan
+        await h.Stop(run);
+    }
+
+    [Fact]
+    public async Task Test_pattern_follows_rotation_and_calibration_and_stops_on_request()
+    {
+        using var h = new SessionHarness(layoutJson: GreyStill, rotation: 180);
+        Calibrate(h, 1, brightness: 50);
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(10));
+        h.Session.ShowTestPattern(TimeSpan.FromSeconds(120));
+        await h.Advance(TimeSpan.FromMilliseconds(1));
+        using (var dev = SKBitmap.Decode(h.Conn.Frames[^1].Data.ToArray()))
+        {
+            Assert.True(IsBlack(dev.GetPixel(1274, 474)));                  // layout top-left, upside down
+            Assert.InRange((int)dev.GetPixel(5, 474).Red, 120, 136);        // white step at 50 % brightness
+        }
+        h.Session.StopTestPattern();
+        await h.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.InRange(SentGrey(h), 60, 68);
+        await h.Stop(run);
+    }
+
+    private static SKColor PixelOf(Glance.Core.Devices.EncodedFrame frame, int x, int y)
+    {
+        using var bmp = SKBitmap.Decode(frame.Data.ToArray());
+        return bmp.GetPixel(x, y);
+    }
+
     /// <summary>Frame i is uniform grey i * 25, so the frame shown can be told from a sent (re-encoded) frame.</summary>
     private static Animation GrayFrames(int count, int delayMs) =>
         new(1280, 480, Enumerable.Range(0, count).Select(i => GrayJpeg((byte)(i * 25))).ToArray(), Enumerable.Repeat(delayMs, count).ToArray());

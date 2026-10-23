@@ -21,6 +21,10 @@ export interface DeviceView {
   layoutMismatch: boolean;
   fps: number;
   framesSent: number;
+  /** 0.5–3, default 1.0; applied only to frames sent to the screen. */
+  gamma: number;
+  /** 10–100 (%), default 100; applied only to frames sent to the screen. */
+  brightness: number;
 }
 
 /** GET /api/layouts item; a layout file that cannot be loaded has width/height 0 and `error` set. */
