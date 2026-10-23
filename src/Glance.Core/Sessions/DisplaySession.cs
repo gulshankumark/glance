@@ -45,9 +45,12 @@ public sealed class DisplaySession
     private volatile string? _layoutName;
     private Passthrough? _passthrough;
     private Exception? _sendFailure;   // the exception SendFrameAsync threw; only this ends the run
+    private ColorCalibration? _calibration;   // of the current plan; applied only to bytes sent to the device
+    private long _testPatternUntil;           // UTC ticks while the test pattern is shown, else 0
 
     /// <summary>Device frames for one animation background, each prepared on its first showing.</summary>
-    private sealed record Passthrough(string AssetId, int Rotation, int LayoutW, int LayoutH, EncodedFrame?[] Frames);
+    private sealed record Passthrough(string AssetId, int Rotation, int LayoutW, int LayoutH, (double Gamma, int Brightness) Calibration,
+        EncodedFrame?[] Frames);
 
     private sealed class Pacer(DateTimeOffset start)
     {
@@ -93,6 +96,22 @@ public sealed class DisplaySession
     public void Invalidate()
     {
         lock (_wakeGate) _wake.Cancel();
+    }
+
+    /// <summary>
+    /// Shows <see cref="TestPattern"/> instead of the layout for <paramref name="duration"/> (in memory only), through
+    /// the same rotation and calibration as the layout.
+    /// </summary>
+    public void ShowTestPattern(TimeSpan duration)
+    {
+        Interlocked.Exchange(ref _testPatternUntil, (_time.GetUtcNow() + duration).UtcTicks);
+        Invalidate();
+    }
+
+    /// <summary>Ends the test pattern early; the layout returns at once.</summary>
+    public void StopTestPattern()
+    {
+        if (Interlocked.Exchange(ref _testPatternUntil, 0) != 0) Invalidate();
     }
 
     /// <summary>The latest composed frame in layout orientation (before fitting and rotation), or null before the first frame.</summary>
@@ -176,10 +195,17 @@ public sealed class DisplaySession
     {
         var device = _settings.Current.Devices.GetValueOrDefault(Key);
         var rotation = device?.Rotation ?? 0;
+        _calibration = ColorCalibration.For(device?.Gamma ?? 1, device?.Brightness ?? 100);
         var layout = device?.ActiveLayout is { } name ? _layouts.Get(name) : null;
         _layoutName = layout?.Name;
         _hub.SetInterest(Key, layout is null ? new Dictionary<string, int>() : _renderer.HistoryNeeds(layout, _hub));
         var (cw, ch) = Orientation.Canvas(DeviceW, DeviceH, rotation);
+
+        if (TestPatternLeft() > TimeSpan.Zero)
+        {
+            await RunTestPatternAsync(rotation, cw, ch, runCt, planCt);
+            return;
+        }
 
         if (layout is null)
         {
@@ -232,6 +258,35 @@ public sealed class DisplaySession
         }
     }
 
+    private TimeSpan TestPatternLeft()
+    {
+        var until = Interlocked.Read(ref _testPatternUntil);
+        return until == 0 ? TimeSpan.Zero : new DateTimeOffset(until, TimeSpan.Zero) - _time.GetUtcNow();
+    }
+
+    /// <summary>Sends the test pattern (kept alive every second) until it expires, then ends the plan.</summary>
+    private async Task RunTestPatternAsync(int rotation, int cw, int ch, CancellationToken runCt, CancellationToken planCt)
+    {
+        var image = new SKBitmap(cw, ch);
+        EncodedFrame frame;
+        try
+        {
+            using (var canvas = new SKCanvas(image)) TestPattern.Draw(canvas, cw, ch);
+            frame = EncodeForDevice(image, rotation);
+        }
+        catch
+        {
+            image.Dispose();
+            throw;
+        }
+        SetPreview(image);
+        for (var left = TestPatternLeft(); left > TimeSpan.Zero; left = TestPatternLeft())
+        {
+            await SendAsync(frame, runCt);
+            await WaitAsync(left < KeepAlive ? left : KeepAlive, planCt);
+        }
+    }
+
     /// <summary>
     /// The background is drawn once per plan into a layout-size bitmap (an image background is read and decoded only
     /// then); each overlay change copies it and draws the overlay on top.
@@ -265,9 +320,11 @@ public sealed class DisplaySession
         CancellationToken runCt, CancellationToken planCt)
     {
         var p = _passthrough;
+        var calibration = (_calibration?.Gamma ?? 1, _calibration?.Brightness ?? 100);
         if (p is null || p.AssetId != assetId || p.Rotation != rotation || p.LayoutW != layout.Width || p.LayoutH != layout.Height
-            || p.Frames.Length != animation.JpegFrames.Count)
-            _passthrough = p = new Passthrough(assetId, rotation, layout.Width, layout.Height, new EncodedFrame?[animation.JpegFrames.Count]);
+            || p.Calibration != calibration || p.Frames.Length != animation.JpegFrames.Count)
+            _passthrough = p = new Passthrough(assetId, rotation, layout.Width, layout.Height, calibration,
+                new EncodedFrame?[animation.JpegFrames.Count]);
 
         FrameCompositor? compositor = null;   // created on the first frame that needs re-encoding
         try
@@ -289,16 +346,16 @@ public sealed class DisplaySession
     }
 
     /// <summary>
-    /// One stored frame as device bytes: the original JPEG when it needs no scaling or rotation and is within the
-    /// device's size limit, otherwise decoded, fitted, rotated and re-encoded.
+    /// One stored frame as device bytes: the original JPEG when it needs no scaling, rotation or calibration and is
+    /// within the device's size limit, otherwise decoded, fitted, rotated, calibrated and re-encoded.
     /// </summary>
     private EncodedFrame PrepareFrame(Animation animation, byte[] jpeg, Layout layout, int rotation, int cw, int ch,
         ref FrameCompositor? compositor)
     {
-        if (rotation == 0 && (animation.Width, animation.Height) == (layout.Width, layout.Height)
+        if (rotation == 0 && _calibration is null && (animation.Width, animation.Height) == (layout.Width, layout.Height)
             && (layout.Width, layout.Height) == (cw, ch) && jpeg.Length <= JpegEncoder.MaxBytes)
             return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, jpeg);
-        compositor ??= new FrameCompositor(layout.Width, layout.Height, DeviceW, DeviceH, rotation, _codec);
+        compositor ??= new FrameCompositor(layout.Width, layout.Height, DeviceW, DeviceH, rotation, _codec, _calibration);
         compositor.Compose(jpeg);
         return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, compositor.Encode().Data);
     }
@@ -311,7 +368,7 @@ public sealed class DisplaySession
     /// </summary>
     private async Task RunAnimatedAsync(Layout layout, Animation animation, int rotation, CancellationToken runCt, CancellationToken planCt)
     {
-        using var compositor = new FrameCompositor(layout.Width, layout.Height, DeviceW, DeviceH, rotation, _codec);
+        using var compositor = new FrameCompositor(layout.Width, layout.Height, DeviceW, DeviceH, rotation, _codec, _calibration);
         var capped = CappedTimeline.CreateIfLimiting(animation.DelaysMs, MinFrameDelayMs, _settings.Current.MaxOverlayAnimationFps);
         string? key = null;
         var checkedAt = 0L;
@@ -448,10 +505,16 @@ public sealed class DisplaySession
         return EncodeForDevice(fitted, rotation);
     }
 
+    /// <summary>
+    /// Rotates and calibrates a canvas-size image into device bytes. <paramref name="canvasImage"/> may be the preview,
+    /// so it is never changed: calibration works on the rotated copy, or on a copy of its own at rotation 0.
+    /// </summary>
     private EncodedFrame EncodeForDevice(SKBitmap canvasImage, int rotation)
     {
-        if (rotation == 0) return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, JpegEncoder.Encode(canvasImage, codec: _codec).Data);
-        using var device = Orientation.ToDevice(canvasImage, rotation);
+        if (rotation == 0 && _calibration is null)
+            return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, JpegEncoder.Encode(canvasImage, codec: _codec).Data);
+        using var device = rotation == 0 ? canvasImage.Copy() : Orientation.ToDevice(canvasImage, rotation);
+        _calibration?.Apply(device);
         return new EncodedFrame(PixelFormat.Jpeg, DeviceW, DeviceH, JpegEncoder.Encode(device, codec: _codec).Data);
     }
 
