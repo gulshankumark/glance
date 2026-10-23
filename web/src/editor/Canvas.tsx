@@ -2,16 +2,12 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, postBlob } from '../api/client';
 import type { Item, Layout } from '../api/types';
 import { SENSOR_DRAG_TYPE } from './catalog';
+import { snapMove, unionRect, type Guide, type Rect } from './align';
 import { duplicateItems, moveItems, removeItems, toLayoutPoint } from './model';
 import { createRenderScheduler, type RenderScheduler } from './scheduler';
 import styles from './Editor.module.css';
 
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+export type { Rect };
 /** POST /api/render/bounds answer: layout-space bounds keyed by item id. */
 export type Bounds = Record<string, Rect>;
 
@@ -23,6 +19,8 @@ const HIT_MIN = 24;
 const TOUCH_MIN_PX = 44;
 /** A press becomes a drag only after the pointer moved this far (CSS pixels); below it, it is a click. */
 const DRAG_THRESHOLD_PX = 4;
+/** A dragged selection snaps to lines this close (CSS pixels on screen). */
+const SNAP_THRESHOLD_PX = 6;
 
 interface Rendered {
   url: string;
@@ -102,13 +100,23 @@ function declaredBox(item: Item): Rect {
   return { x: item.x, y: item.y, ...sized };
 }
 
-/** The selection hit box of an item in layout pixels: measured bounds shifted by any move since, padded. */
-export function hitBox(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'> | null): Rect {
+/** Measured bounds of an item shifted by any move since they were measured, or null when it was not measured. */
+function measuredBox(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'> | null): Rect | null {
   const measured = rendered?.bounds[item.id];
   const then = rendered?.layout.items.find((i) => i.id === item.id);
-  const r = measured && then
+  return measured && then
     ? { ...measured, x: measured.x + item.x - then.x, y: measured.y + item.y - then.y }
-    : declaredBox(item);
+    : null;
+}
+
+/** What is drawn of an item (text: its ink) in layout pixels, falling back to its hit box when not measured. */
+export function drawnRect(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'> | null): Rect {
+  return measuredBox(item, rendered) ?? hitBox(item, rendered);
+}
+
+/** The selection hit box of an item in layout pixels: measured bounds shifted by any move since, padded. */
+export function hitBox(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'> | null): Rect {
+  const r = measuredBox(item, rendered) ?? declaredBox(item);
   const grow = (pos: number, len: number) => {
     let p = pos - HIT_PAD;
     let l = len + 2 * HIT_PAD;
@@ -122,6 +130,9 @@ export function hitBox(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'>
   const [y, height] = grow(r.y, r.height);
   return { x, y, width, height };
 }
+
+const sameGuides = (a: readonly Guide[], b: readonly Guide[]) =>
+  a.length === b.length && a.every((g, i) => g.axis === b[i].axis && g.at === b[i].at);
 
 export interface CanvasProps {
   layout: Layout;
@@ -145,6 +156,9 @@ interface Drag {
   origins: Record<string, { x: number; y: number }>;
   /** A plain press on an item of a multi-selection: released without moving, it narrows the selection to it. */
   narrowTo: string | null;
+  /** Drawn union rectangle of the dragged items at the start, and drawn rectangles of the others (snap targets). */
+  moving: Rect;
+  targets: Rect[];
 }
 
 /**
@@ -158,6 +172,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const dragRef = useRef<Drag | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
 
   const pointAt = (e: { clientX: number; clientY: number }) => {
     const l = layoutRef.current;
@@ -184,11 +199,21 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
       narrowTo = ids.length > 1 ? item.id : null;
     }
     const origins: Drag['origins'] = {};
-    for (const i of layoutRef.current.items) if (ids.includes(i.id)) origins[i.id] = { x: i.x, y: i.y };
+    const moving: Rect[] = [];
+    const targets: Rect[] = [];
+    for (const i of layoutRef.current.items) {
+      const drawn = drawnRect(i, rendered);
+      if (ids.includes(i.id)) {
+        origins[i.id] = { x: i.x, y: i.y };
+        moving.push(drawn);
+      } else {
+        targets.push(drawn);
+      }
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = {
       pointerId: e.pointerId, start: pointAt(e), startClient: { x: e.clientX, y: e.clientY }, active: false, origins,
-      narrowTo,
+      narrowTo, moving: unionRect(moving), targets,
     };
   };
 
@@ -201,8 +226,17 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
       drag.narrowTo = null;
     }
     const p = pointAt(e);
-    const dx = Math.round(p.x - drag.start.x);
-    const dy = Math.round(p.y - drag.start.y);
+    const l = layoutRef.current;
+    let dx = p.x - drag.start.x;
+    let dy = p.y - drag.start.y;
+    let hit: Guide[] = [];
+    if (!e.altKey) {
+      const threshold = SNAP_THRESHOLD_PX * (l.width / stageRef.current!.getBoundingClientRect().width);
+      ({ dx, dy, guides: hit } = snapMove(drag.moving, drag.targets, l, dx, dy, threshold));
+    }
+    setGuides((old) => (sameGuides(old, hit) ? old : hit));
+    dx = Math.round(dx);
+    dy = Math.round(dy);
     // Every dragged item lands at its own origin + the same delta, whatever moves were applied before.
     const moves: Record<string, { dx: number; dy: number }> = {};
     for (const i of layoutRef.current.items) {
@@ -217,6 +251,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     const drag = dragRef.current;
     if (drag?.pointerId !== e.pointerId) return;
     dragRef.current = null;
+    setGuides([]);
     if (e.type === 'pointerup' && drag.narrowTo) onSelect([drag.narrowTo]);
   };
 
@@ -286,7 +321,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
   return (
     <div>
       <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
-        Click or tap an item to select it, drag to move. Shift+click (Shift+Space in the Items list) adds to the selection. Keys: Arrows move 1 px,
+        Click or tap an item to select it, drag to move (it snaps to other items and the canvas; hold Alt to place freely). Shift+click (Shift+Space in the Items list) adds to the selection. Keys: Arrows move 1 px,
         Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears.
       </p>
       <div
@@ -324,6 +359,17 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
           />
         )}
+        {guides.map((g) => (
+          <div
+            key={`${g.axis}${g.at}`}
+            data-testid="snap-guide"
+            aria-hidden="true"
+            className={styles.snapGuide}
+            style={g.axis === 'x'
+              ? { left: `min(${pct(g.at, layout.width)}, calc(100% - 1px))`, top: 0, bottom: 0, width: 1 }
+              : { top: `min(${pct(g.at, layout.height)}, calc(100% - 1px))`, left: 0, right: 0, height: 1 }}
+          />
+        ))}
         {layout.items.map((item) => {
           const b = hitBox(item, rendered);
           const h = span(b.x, b.width, layout.width);

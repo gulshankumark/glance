@@ -315,3 +315,11 @@
   font-size: 0.8rem;
   text-align: center;
 }
+
+/* Snap guide while dragging on the canvas: a 1 px accent line, above the items, never hit by the pointer. */
+.snapGuide {
+  position: absolute;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
