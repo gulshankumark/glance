@@ -20,6 +20,8 @@ export interface ApiOptions {
   skipAuthRedirect?: boolean;
   /** Aborts the request (fetch rejects with an AbortError). */
   signal?: AbortSignal;
+  /** Lets the request outlive the page (fetch keepalive), e.g. from a pagehide handler. */
+  keepalive?: boolean;
 }
 
 const defaultUnauthorizedHandler: UnauthorizedHandler = (currentHash: string) => {
@@ -92,6 +94,7 @@ export async function api<T>(method: string, path: string, body?: unknown, optio
     headers,
     body: bodyPayload,
     signal: options?.signal,
+    ...(options?.keepalive ? { keepalive: true } : {}),
   });
 
   return handleResponse<T>(res, options);
@@ -166,4 +169,9 @@ export async function postBlob(path: string, body: unknown, options: ApiOptions 
   });
   if (!res.ok) return handleResponse<never>(res, options);
   return res.blob();
+}
+
+/** Shows (POST) or ends (DELETE) the full-screen test pattern on a device; the service ends it by itself after 120 s. */
+export function setTestPattern(deviceKey: string, on: boolean, options?: ApiOptions): Promise<void> {
+  return api<void>(on ? 'POST' : 'DELETE', `/api/devices/${encodeURIComponent(deviceKey)}/test-pattern`, undefined, options);
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { DeviceView, LayoutSummary, Rotation } from '../api/types';
+import { Calibration } from '../devices/Calibration';
 import { LayoutSelect, ROTATIONS, useDeviceUpdate } from '../devices/DeviceControls';
 import { useDeviceList } from '../devices/useDeviceList';
 import { formatNextRetry } from '../lib/format';
@@ -70,6 +71,7 @@ const DeviceEntry: React.FC<DeviceEntryProps> = ({ device, layouts, onUpdated })
               ))}
             </Select>
           </Field>
+          {device.status === 'connected' && <Calibration device={device} onUpdated={onUpdated} />}
         </>
       )}
     </Card>

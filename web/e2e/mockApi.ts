@@ -387,6 +387,17 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       return;
     }
 
+    if (path.startsWith('/api/devices/') && path.endsWith('/test-pattern') && (method === 'POST' || method === 'DELETE')) {
+      const key = decodeURIComponent(path.slice('/api/devices/'.length, -'/test-pattern'.length));
+      const dev = devices.find((d) => d.key === key && d.status === 'connected');
+      if (!dev) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown device' }) });
+        return;
+      }
+      await route.fulfill({ status: 204 });
+      return;
+    }
+
     if (path.startsWith('/api/devices/') && method === 'PUT') {
       const key = decodeURIComponent(path.replace('/api/devices/', ''));
       const dev = devices.find((d) => d.key === key);
@@ -398,9 +409,16 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
         await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ errors: [opts.deviceWriteError] }) });
         return;
       }
-      const patch = body as { rotation?: 0 | 90 | 180 | 270; activeLayout?: string | null };
+      const patch = body as {
+        rotation?: 0 | 90 | 180 | 270;
+        activeLayout?: string | null;
+        gamma?: number;
+        brightness?: number;
+      };
       if (patch.rotation !== undefined) dev.rotation = patch.rotation;
       if (patch.activeLayout !== undefined) dev.activeLayout = patch.activeLayout;
+      if (patch.gamma !== undefined) dev.gamma = patch.gamma;
+      if (patch.brightness !== undefined) dev.brightness = patch.brightness;
 
       await route.fulfill({
         status: 200,

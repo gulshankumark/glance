@@ -1,0 +1,86 @@
+.fieldset {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  margin-bottom: var(--space-3);
+  min-width: 0;
+}
+
+.fieldset > legend {
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0 var(--space-1);
+}
+
+.slider {
+  margin-bottom: var(--space-3);
+}
+
+.sliderHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: 0.875rem;
+}
+
+.sliderHead label {
+  font-weight: 500;
+}
+
+.sliderHead output {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.steps {
+  display: flex;
+  height: 20px;
+  border: 1px solid var(--surface-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: var(--space-1);
+}
+
+.steps > div {
+  flex: 1;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: var(--space-3);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.error {
+  margin-top: calc(-1 * var(--space-2));
+  margin-bottom: var(--space-3);
+  font-size: 0.8rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* Button sets its colours inline; the pressed toggle overrides them. */
+.toggle[aria-pressed='true'] {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-text) !important;
+}
+
+.patternError {
+  margin-top: var(--space-2);
+  font-size: 0.8rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
