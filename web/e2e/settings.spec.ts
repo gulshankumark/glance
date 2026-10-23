@@ -158,6 +158,7 @@ test.describe('Settings Tab', () => {
 
   test('port conflict message', async ({ page }) => {
     const api = await mockApi(page, { busyPorts: [9000] });
+    await page.clock.install();
     await page.goto('/#settings');
     const access = section(page, 'Access');
     await expect(access.getByLabel('Port')).toHaveValue('8735');
@@ -170,7 +171,7 @@ test.describe('Settings Tab', () => {
     await access.getByLabel('Port').fill('9000');
     await access.getByRole('button', { name: 'Save network settings' }).click();
     await expect(access.getByRole('alert')).toHaveText('Port is in use by another program. Choose a different port.');
-    await page.waitForTimeout(1700);
+    await page.clock.runFor(5000);
     expect(new URL(page.url()).port).toBe('4173');
     await expect(page.getByText('The page will reload at the new address')).toHaveCount(0);
   });
@@ -180,6 +181,7 @@ test.describe('Settings Tab', () => {
     await page.route('http://localhost:9100/**', (route) =>
       route.fulfill({ status: 200, contentType: 'text/html', body: '<title>moved</title>' }),
     );
+    await page.clock.install();
     await page.goto('/#settings');
     const access = section(page, 'Access');
 
@@ -192,13 +194,78 @@ test.describe('Settings Tab', () => {
       https: false,
       port: 8735,
     });
-    await page.waitForTimeout(1700);
+    await page.clock.runFor(5000);
     expect(new URL(page.url()).port).toBe('4173');
 
     await access.getByLabel('Port').fill('9100');
     await access.getByRole('button', { name: 'Save network settings' }).click();
     await expect(page.getByText('The page will reload at the new address')).toBeVisible();
+    await page.clock.runFor(2000);
     await page.waitForURL('http://localhost:9100/#settings');
+  });
+
+  test('server refusal to enable network access shows inline and stays', async ({ page }) => {
+    const api = await mockApi(page, { networkAccess: false });
+    await page.route('**/api/settings/network', (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'set a password before enabling network access' }),
+      }),
+    );
+    await page.clock.install();
+    await page.goto('/#settings');
+    const access = section(page, 'Access');
+    await access.getByLabel('Allow access from other devices on the network').check();
+    await access.getByLabel('Port').fill('9100');
+    await access.getByRole('button', { name: 'Save network settings' }).click();
+    await expect(access.getByRole('alert')).toHaveText('Set a password before enabling network access');
+    await page.clock.runFor(5000);
+    expect(new URL(page.url()).port).toBe('4173');
+    await expect(page.getByText('The page will reload at the new address')).toHaveCount(0);
+    expect(api.settings.networkAccess).toBe(false);
+  });
+
+  test('turning network access off from another device asks first', async ({ page }) => {
+    const api = await mockApi(page, { loopback: false, authenticated: true });
+    await page.clock.install();
+    await page.goto('/#settings');
+    const access = section(page, 'Access');
+    const networkPuts = () => api.calls.filter((c) => c.path === '/api/settings/network');
+
+    await access.getByLabel('Allow access from other devices on the network').uncheck();
+    await access.getByLabel('Port').fill('9100');
+    await access.getByRole('button', { name: 'Save network settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Turn off network access?' });
+    await expect(dialog).toContainText(
+      "You are connected from another device. Turning this off disconnects this device; you'll need to turn it back on from the computer running Glance.",
+    );
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(networkPuts()).toHaveLength(0);
+
+    await access.getByRole('button', { name: 'Save network settings' }).click();
+    await dialog.getByRole('button', { name: 'Turn off' }).click();
+    await expect(access.getByRole('status')).toHaveText(
+      'Network access is off. This device is now disconnected; turn it back on from the computer running Glance.',
+    );
+    expect(networkPuts()).toHaveLength(1);
+    expect(networkPuts()[0].body).toEqual({ enabled: false, https: false, port: 9100 });
+    await expect(access.getByText('Network settings saved')).toHaveCount(0);
+    await page.clock.runFor(5000);
+    expect(new URL(page.url()).port).toBe('4173');
+    await expect(page.getByText('The page will reload at the new address')).toHaveCount(0);
+  });
+
+  test('turning network access off on this computer does not ask', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#settings');
+    const access = section(page, 'Access');
+    await access.getByLabel('Allow access from other devices on the network').uncheck();
+    await access.getByRole('button', { name: 'Save network settings' }).click();
+    await expect(access.getByText('Network settings saved')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(api.settings.networkAccess).toBe(false);
   });
 
   test('https switches the scheme of the new address', async ({ page }) => {

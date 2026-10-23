@@ -5,6 +5,7 @@ import { serviceAddress } from '../lib/serviceAddress';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { Dialog } from '../ui/Dialog';
 import { Field } from '../ui/Field';
 import { Select } from '../ui/Select';
 import styles from './SettingsTab.module.css';
@@ -251,7 +252,12 @@ const PasswordForm: React.FC<{ hasPassword: boolean; onSaved: () => void }> = ({
 
 type NetworkResult = Pick<Settings, 'networkAccess' | 'https' | 'port'>;
 
-const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void }> = ({ settings, onSaved }) => {
+const NetworkForm: React.FC<{
+  settings: Settings;
+  /** The page is used from another device (not loopback): turning network access off locks it out. */
+  remote: boolean;
+  onSaved: (s: Settings) => void;
+}> = ({ settings, remote, onSaved }) => {
   const [enabled, setEnabled] = useState(settings.networkAccess);
   const [https, setHttps] = useState(settings.https);
   const [port, setPort] = useState(String(settings.port));
@@ -260,6 +266,8 @@ const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const [confirmPort, setConfirmPort] = useState<number | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -281,12 +289,23 @@ const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void
       return;
     }
     setPortError(null);
+    if (remote && settings.networkAccess && !enabled) {
+      setConfirmPort(portNumber);
+      return;
+    }
+    await send(portNumber);
+  };
+
+  const send = async (portNumber: number) => {
     setSaving(true);
     try {
       const result = await api<NetworkResult>('PUT', '/api/settings/network', { enabled, https, port: portNumber });
       onSaved({ ...settings, ...result });
-      // Only a new scheme or port moves the UI; navigate after the user has had a moment to read why.
-      if (result.https !== settings.https || result.port !== settings.port) {
+      if (remote && !result.networkAccess) {
+        // This device has just lost access: there is no address to move to.
+        setDisconnected(true);
+      } else if (result.https !== settings.https || result.port !== settings.port) {
+        // Only a new scheme or port moves the UI; navigate after the user has had a moment to read why.
         setReloading(true);
         const target = serviceAddress(window.location.hostname, result.https, result.port);
         timer.current = window.setTimeout(() => window.location.assign(target), RELOAD_DELAY_MS);
@@ -335,7 +354,7 @@ const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void
         />
       </Field>
       <div className={styles.actions}>
-        <Button type="submit" disabled={saving || reloading}>
+        <Button type="submit" disabled={saving || reloading || disconnected}>
           Save network settings
         </Button>
         {saved && (
@@ -344,6 +363,33 @@ const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void
           </span>
         )}
       </div>
+      {disconnected && (
+        <Banner variant="warning" style={{ marginTop: 'var(--space-3)' }}>
+          Network access is off. This device is now disconnected; turn it back on from the computer running Glance.
+        </Banner>
+      )}
+      <Dialog open={confirmPort !== null} title="Turn off network access?" onClose={() => setConfirmPort(null)}>
+        <p style={{ marginBottom: 'var(--space-4)' }}>
+          You are connected from another device. Turning this off disconnects this device; you'll need to turn it back
+          on from the computer running Glance.
+        </p>
+        <div className={styles.actions} style={{ justifyContent: 'flex-end' }}>
+          <Button variant="secondary" type="button" onClick={() => setConfirmPort(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => {
+              const p = confirmPort;
+              setConfirmPort(null);
+              if (p !== null) void send(p);
+            }}
+          >
+            Turn off
+          </Button>
+        </div>
+      </Dialog>
       {reloading && (
         <Banner variant="info" style={{ marginTop: 'var(--space-3)' }}>
           The page will reload at the new address
@@ -473,7 +519,7 @@ export const SettingsTab: React.FC<{ navigate: (hash: string) => void }> = ({ na
                 hasPassword={settings.hasPassword}
                 onSaved={() => setSettings((s) => (s ? { ...s, hasPassword: true } : s))}
               />
-              <NetworkForm settings={settings} onSaved={setSettings} />
+              <NetworkForm settings={settings} remote={!!auth && !auth.loopback} onSaved={setSettings} />
               {auth?.authenticated && !auth.loopback && <LogoutButton navigate={navigate} />}
             </Card>
           )}
