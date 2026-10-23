@@ -387,6 +387,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
               onPointerMove={onBoxPointerMove}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
+              onLostPointerCapture={endDrag}
               style={{
                 position: 'absolute',
                 left: h.start,
