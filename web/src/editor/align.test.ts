@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { snapMove, unionRect } from './align';
+import { alignMoves, distributeMoves, snapMove, unionRect, type Rect } from './align';
 
 const CANVAS = { width: 1280, height: 480 };
 const MOVING = { x: 10, y: 10, width: 100, height: 20 };
@@ -93,5 +93,86 @@ describe('snapMove', () => {
     expect(Math.abs(r.dx - 187)).toBeLessThanOrEqual(6);
     const keys = r.guides.map((g) => `${g.axis}${g.at}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('alignMoves', () => {
+  const rows: Record<string, Rect> = {
+    a: { x: 31, y: 51, width: 100, height: 31 },
+    b: { x: 33, y: 86, width: 200, height: 24 },
+    c: { x: 36, y: 154, width: 150, height: 31 },
+  };
+
+  it('left aligns every left edge to the leftmost', () => {
+    expect(alignMoves(rows, 'left')).toEqual({ a: { dx: 0, dy: 0 }, b: { dx: -2, dy: 0 }, c: { dx: -5, dy: 0 } });
+  });
+
+  it('right aligns every right edge to the union right', () => {
+    // Union right is b's: 233.
+    expect(alignMoves(rows, 'right')).toEqual({ a: { dx: 102, dy: 0 }, b: { dx: 0, dy: 0 }, c: { dx: 47, dy: 0 } });
+  });
+
+  it('centre aligns horizontal centres to the union centre', () => {
+    const r = { a: { x: 0, y: 0, width: 100, height: 10 }, b: { x: 100, y: 50, width: 200, height: 10 } };
+    // Union 0..300, centre 150: a's centre 50 → +100, b's centre 200 → −50.
+    expect(alignMoves(r, 'centre')).toEqual({ a: { dx: 100, dy: 0 }, b: { dx: -50, dy: 0 } });
+  });
+
+  it('top, middle and bottom align on the vertical axis', () => {
+    // Union y 51..185, middle 118.
+    expect(alignMoves(rows, 'top')).toEqual({ a: { dx: 0, dy: 0 }, b: { dx: 0, dy: -35 }, c: { dx: 0, dy: -103 } });
+    expect(alignMoves(rows, 'middle')).toEqual({
+      a: { dx: 0, dy: 118 - 66.5 }, b: { dx: 0, dy: 118 - 98 }, c: { dx: 0, dy: 118 - 169.5 },
+    });
+    expect(alignMoves(rows, 'bottom')).toEqual({ a: { dx: 0, dy: 103 }, b: { dx: 0, dy: 75 }, c: { dx: 0, dy: 0 } });
+  });
+});
+
+describe('distributeMoves', () => {
+  const after = (rects: Record<string, Rect>, moves: Record<string, { dx: number; dy: number }>) =>
+    Object.fromEntries(Object.entries(rects).map(([id, r]) => [id, { ...r, x: r.x + moves[id].dx, y: r.y + moves[id].dy }]));
+
+  it('vertically: first and last stay, the middle row moves so both gaps are equal', () => {
+    const rows = {
+      top: { x: 31, y: 51, width: 100, height: 31 },
+      mid: { x: 33, y: 86, width: 100, height: 24 },
+      low: { x: 36, y: 154, width: 100, height: 31 },
+    };
+    const m = distributeMoves(rows, 'y');
+    expect(m).toEqual({ top: { dx: 0, dy: 0 }, mid: { dx: 0, dy: 20 }, low: { dx: 0, dy: 0 } });
+    const r = after(rows, m);
+    expect(r.mid.y - (r.top.y + r.top.height)).toBe(24);
+    expect(r.low.y - (r.mid.y + r.mid.height)).toBe(24);
+  });
+
+  it('orders by position, not by key order, and keeps the gaps equal horizontally', () => {
+    const rects = {
+      c: { x: 300, y: 0, width: 50, height: 10 },
+      a: { x: 0, y: 5, width: 20, height: 10 },
+      d: { x: 90, y: 0, width: 40, height: 10 },
+      b: { x: 30, y: 0, width: 10, height: 10 },
+    };
+    // Span 0..350, sizes 120 → gap (350 − 120) / 3 = 76.67: b at 96.67, d at 183.33.
+    const m = distributeMoves(rects, 'x');
+    expect(m.a).toEqual({ dx: 0, dy: 0 });
+    expect(m.c).toEqual({ dx: 0, dy: 0 });
+    expect(m.b.dx).toBeCloseTo(66.667, 2);
+    expect(m.d.dx).toBeCloseTo(93.333, 2);
+    expect(m.b.dy).toBe(0);
+  });
+
+  it('keeps equal (negative) gaps when the rectangles overlap', () => {
+    const rects = {
+      a: { x: 0, y: 0, width: 100, height: 10 },
+      b: { x: 10, y: 0, width: 100, height: 10 },
+      c: { x: 50, y: 0, width: 100, height: 10 },
+    };
+    // Span 0..150, sizes 300 → gap −75: b at 25.
+    expect(distributeMoves(rects, 'x').b).toEqual({ dx: 15, dy: 0 });
+  });
+
+  it('moves nothing with fewer than three rectangles', () => {
+    const m = distributeMoves({ a: { x: 0, y: 0, width: 10, height: 10 }, b: { x: 50, y: 0, width: 10, height: 10 } }, 'x');
+    expect(Object.values(m).every((v) => v.dx === 0 && v.dy === 0)).toBe(true);
   });
 });

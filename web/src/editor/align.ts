@@ -59,3 +59,50 @@ export function snapMove(
     guides: [...x.hit.map((at) => ({ axis: 'x' as const, at })), ...y.hit.map((at) => ({ axis: 'y' as const, at }))],
   };
 }
+
+export type AlignMode = 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom';
+
+type Moves = Record<string, { dx: number; dy: number }>;
+
+/** Moves that line every rectangle up on one edge or centre of their union rectangle. */
+export function alignMoves(rects: Record<string, Rect>, mode: AlignMode): Moves {
+  const all = Object.values(rects);
+  if (all.length === 0) return {};
+  const u = unionRect(all);
+  const moves: Moves = {};
+  for (const [id, r] of Object.entries(rects)) {
+    switch (mode) {
+      case 'left': moves[id] = { dx: u.x - r.x, dy: 0 }; break;
+      case 'centre': moves[id] = { dx: u.x + u.width / 2 - (r.x + r.width / 2), dy: 0 }; break;
+      case 'right': moves[id] = { dx: u.x + u.width - (r.x + r.width), dy: 0 }; break;
+      case 'top': moves[id] = { dx: 0, dy: u.y - r.y }; break;
+      case 'middle': moves[id] = { dx: 0, dy: u.y + u.height / 2 - (r.y + r.height / 2) }; break;
+      case 'bottom': moves[id] = { dx: 0, dy: u.y + u.height - (r.y + r.height) }; break;
+    }
+  }
+  return moves;
+}
+
+/**
+ * Moves that space the rectangles evenly along one axis, ordered by their start: the first and the last stay put and
+ * every gap between neighbours becomes (last end − first start − sum of sizes) / (n − 1), negative when they overlap.
+ * Fewer than three rectangles do not move.
+ */
+export function distributeMoves(rects: Record<string, Rect>, axis: 'x' | 'y'): Moves {
+  const start = (r: Rect) => (axis === 'x' ? r.x : r.y);
+  const size = (r: Rect) => (axis === 'x' ? r.width : r.height);
+  const entries = Object.entries(rects).sort(([, a], [, b]) => start(a) - start(b));
+  const moves: Moves = Object.fromEntries(entries.map(([id]) => [id, { dx: 0, dy: 0 }]));
+  if (entries.length < 3) return moves;
+  const first = entries[0][1];
+  const last = entries[entries.length - 1][1];
+  const total = entries.reduce((s, [, r]) => s + size(r), 0);
+  const gap = (start(last) + size(last) - start(first) - total) / (entries.length - 1);
+  let at = start(first);
+  for (const [id, r] of entries.slice(0, -1)) {
+    const d = at - start(r);
+    moves[id] = axis === 'x' ? { dx: d, dy: 0 } : { dx: 0, dy: d };
+    at += size(r) + gap;
+  }
+  return moves;
+}

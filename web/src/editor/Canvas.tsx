@@ -2,7 +2,8 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, postBlob } from '../api/client';
 import type { Item, Layout } from '../api/types';
 import { SENSOR_DRAG_TYPE } from './catalog';
-import { snapMove, unionRect, type Guide, type Rect } from './align';
+import { alignMoves, distributeMoves, snapMove, unionRect, type Guide, type Rect } from './align';
+import { AlignBar } from './AlignBar';
 import { duplicateItems, moveItems, removeItems, toLayoutPoint } from './model';
 import { createRenderScheduler, type RenderScheduler } from './scheduler';
 import styles from './Editor.module.css';
@@ -289,6 +290,14 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     }
   };
 
+  const selection = layout.items.filter((i) => selectedIds.includes(i.id));
+  /** Applies align/distribute moves computed on the selection's drawn rectangles, as one draft change. */
+  const arrange = (compute: (rects: Record<string, Rect>) => Record<string, { dx: number; dy: number }>) => {
+    const rects = Object.fromEntries(selection.map((i) => [i.id, drawnRect(i, rendered)]));
+    const next = moveItems(layout, compute(rects));
+    if (next !== layout) onChange(next);
+  };
+
   const onDragOver = (e: React.DragEvent) => {
     if (!onDropSensor || !e.dataTransfer.types.includes(SENSOR_DRAG_TYPE)) return;
     e.preventDefault();
@@ -322,8 +331,16 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     <div>
       <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
         Click or tap an item to select it, drag to move (it snaps to other items and the canvas; hold Alt to place freely). Shift+click (Shift+Space in the Items list) adds to the selection. Keys: Arrows move 1 px,
-        Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears.
+        Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears. With two or more selected, the Align buttons above line them up by what is drawn.
       </p>
+      {/* Hidden rather than removed below two items, so selecting does not shift the canvas under the pointer. */}
+      <div style={{ visibility: selection.length >= 2 ? 'visible' : 'hidden' }}>
+        <AlignBar
+          count={selection.length}
+          onAlign={(mode) => arrange((r) => alignMoves(r, mode))}
+          onDistribute={(axis) => arrange((r) => distributeMoves(r, axis))}
+        />
+      </div>
       <div
         ref={stageRef}
         data-testid="layout-canvas"
