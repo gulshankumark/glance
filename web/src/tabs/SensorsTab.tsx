@@ -1,25 +1,250 @@
-import React, { useEffect, useState } from 'react';
-import { api } from '../api/client';
-import type { SensorsResponse } from '../api/types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, ApiError } from '../api/client';
+import type { Sensor, SensorsResponse } from '../api/types';
+import { displayName, roleLabel } from '../editor/catalog';
+import { useTreeGroups } from '../editor/SensorTree';
+import { formatValue } from '../lib/format';
+import { useSensorValues } from '../live/LiveProvider';
+import { LiveValue } from '../live/LiveValue';
+import { Banner } from '../ui/Banner';
+import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { Field } from '../ui/Field';
+import { Select } from '../ui/Select';
+import styles from './SensorsTab.module.css';
 
-export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => {
-  const [data, setData] = useState<SensorsResponse | null>(null);
+const errorText = (e: unknown): string => (e instanceof ApiError ? e.message : 'Could not reach the service.');
 
-  useEffect(() => {
-    api<SensorsResponse>('GET', '/api/sensors')
-      .then(setData)
-      .catch(() => {
-        // Handled by api client if 401
-      });
-  }, []);
+/** One alias cell: shows the alias; Enter saves, Escape cancels, empty clears. Errors stay inline, the edit stays open. */
+const AliasCell: React.FC<{ sensor: Sensor; onSaved: (id: string, alias: string | null) => void }> = ({ sensor, onSaved }) => {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cancel = () => {
+    setDraft(null);
+    setError(null);
+  };
+
+  const save = async () => {
+    if (draft === null || saving) return;
+    const alias = draft.trim() || null;
+    setSaving(true);
+    setError(null);
+    try {
+      await api<void>('PUT', '/api/sensors/alias', { id: sensor.id, alias });
+      onSaved(sensor.id, alias);
+      setDraft(null);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (draft === null) {
+    return (
+      <button
+        type="button"
+        className={styles.editBtn}
+        aria-label={`Edit alias of ${sensor.name}`}
+        onClick={() => setDraft(sensor.alias ?? '')}
+      >
+        {sensor.alias ?? <span className={styles.placeholder}>Add alias</span>}
+      </button>
+    );
+  }
 
   return (
     <div>
-      <Card title="Sensors">
-        <p style={{ color: 'var(--muted)' }}>
-          {data ? `${data.sensors.length} sensors loaded` : 'Sensors list will arrive here.'}
+      <div className={styles.editRow}>
+        <input
+          className={styles.input}
+          aria-label="Alias"
+          autoFocus
+          value={draft}
+          disabled={saving}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void save();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+        />
+        <Button type="button" disabled={saving} onClick={() => void save()}>
+          Save
+        </Button>
+        <Button type="button" variant="secondary" disabled={saving} onClick={cancel}>
+          Cancel
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className={styles.error}>
+          {error}
         </p>
+      )}
+    </div>
+  );
+};
+
+export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => {
+  const [data, setData] = useState<SensorsResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  // The API only reports what a role resolves to, not whether it is pinned: remember this session's pins.
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const [roleErrors, setRoleErrors] = useState<Record<string, string>>({});
+  const values = useSensorValues();
+
+  const load = useCallback(async () => {
+    try {
+      setData(await api<SensorsResponse>('GET', '/api/sensors'));
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(errorText(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const treeGroups = useTreeGroups(data, query);
+  const groups = useMemo(() => treeGroups.filter((g) => g.label !== 'Roles'), [treeGroups]);
+  const byId = useMemo(() => new Map((data?.sensors ?? []).map((s) => [s.id, s])), [data]);
+
+  const aliasSaved = useCallback((id: string, alias: string | null) => {
+    setData((d) => (d ? { ...d, sensors: d.sensors.map((s) => (s.id === id ? { ...s, alias } : s)) } : d));
+  }, []);
+
+  const pinRole = async (role: string, sensorId: string) => {
+    setRoleErrors((r) => ({ ...r, [role]: '' }));
+    try {
+      await api<void>('PUT', `/api/roles/${encodeURIComponent(role)}`, { sensorId: sensorId || null });
+      setPins((p) => ({ ...p, [role]: sensorId }));
+      await load();
+    } catch (e) {
+      setRoleErrors((r) => ({ ...r, [role]: errorText(e) }));
+    }
+  };
+
+  if (!data) {
+    return (
+      <Card title="Sensors">
+        {loadError ? (
+          <p role="alert" className={styles.error}>
+            {loadError}
+          </p>
+        ) : (
+          <p className={styles.muted}>Loading sensors…</p>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <div>
+      {data.diagnostics.length > 0 && (
+        <div className={styles.banners}>
+          {data.diagnostics.map((d) => (
+            <Banner key={d.code} data-testid={`diagnostic-${d.code}`}>
+              <span>
+                {d.message}
+                <span className={styles.bannerNote}>See the installation guide.</span>
+              </span>
+            </Banner>
+          ))}
+        </div>
+      )}
+
+      <Card title="Roles">
+        <p className={styles.muted} style={{ marginBottom: 'var(--space-3)' }}>
+          A role is a named reading layouts can use. Automatic picks the best sensor; pin one to override.
+        </p>
+        <div className={styles.roles}>
+          {Object.entries(data.roles).map(([role, id]) => {
+            const target = id ? byId.get(id) : undefined;
+            return (
+              <div key={role}>
+                <Field label={roleLabel(role)} error={roleErrors[role] || undefined}>
+                  <Select value={pins[role] ?? ''} onChange={(e) => void pinRole(role, e.target.value)}>
+                    <option value="">Automatic</option>
+                    {data.sensors.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {`${displayName(s)} — ${s.hardware}`}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <p className={styles.resolved} data-testid={`role-resolved-${role}`}>
+                  Now: {target ? displayName(target) : 'not available'}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card title="Sensors">
+        <div className={styles.toolbar}>
+          <input
+            type="search"
+            className={styles.search}
+            aria-label="Search sensors"
+            placeholder="Search sensors"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        {loadError && (
+          <p role="alert" className={styles.error}>
+            {loadError}
+          </p>
+        )}
+        {groups.length === 0 && (
+          <p className={styles.muted}>{data.sensors.length === 0 ? 'No sensors found.' : 'No sensor matches.'}</p>
+        )}
+        {groups.map((g) => (
+          <section key={g.label} className={styles.group}>
+            <h3 className={styles.groupTitle}>{g.label}</h3>
+            <div className={styles.scroll}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th scope="col">Sensor</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Alias</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.leaves.map((leaf) => {
+                    const s = byId.get(leaf.ref);
+                    if (!s) return null;
+                    const v = s.id in values ? values[s.id] : s.value;
+                    return (
+                      <tr key={s.id} data-testid={`sensor-row-${s.id}`}>
+                        <td className={styles.name}>
+                          {s.name}
+                          <span className={styles.sub}>{s.hardware}</span>
+                        </td>
+                        <td className={styles.value}>
+                          <LiveValue>{formatValue(v, s.unit ?? undefined)}</LiveValue>
+                        </td>
+                        <td className={styles.alias}>
+                          <AliasCell sensor={s} onSaved={aliasSaved} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
       </Card>
     </div>
   );
