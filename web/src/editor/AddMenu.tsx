@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { Asset, Item, ItemType, Layout, SensorsResponse } from '../api/types';
 import { Button } from '../ui/Button';
 import { IMAGE_KINDS } from './assets';
@@ -38,6 +38,45 @@ export const AddMenu: React.FC<AddMenuProps> = ({ layout, catalog, assets, onIns
 
   const add = (item: Item) => onInsert(centered(item, layout));
 
+  const menuId = useId();
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  const gaugeButtonRef = useRef<HTMLButtonElement>(null);
+  const menuItems = () => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+
+  const closeGauges = () => {
+    setGaugesOpen(false);
+    gaugeButtonRef.current?.focus();
+  };
+
+  // An opened menu takes focus on its first item; a press outside closes it.
+  useEffect(() => {
+    if (!gaugesOpen) return;
+    menuItems()[0]?.focus();
+    const onPointerDown = (e: PointerEvent) => {
+      if (!anchorRef.current?.contains(e.target as Node)) setGaugesOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [gaugesOpen]);
+
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = menuItems();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const go = (i: number) => items[(i + items.length) % items.length]?.focus();
+    if (e.key === 'ArrowDown') go(at + 1);
+    else if (e.key === 'ArrowUp') go(at - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+    else if (e.key === 'Escape') closeGauges();
+    else if (e.key === 'Tab') {
+      setGaugesOpen(false);
+      return;
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return (
     <div className={styles.addMenu} data-testid="add-menu">
       <Button type="button" variant="secondary" onClick={() => add(defaultItem('text', 0, 0))}>
@@ -49,26 +88,36 @@ export const AddMenu: React.FC<AddMenuProps> = ({ layout, catalog, assets, onIns
       <Button type="button" variant="secondary" onClick={() => setPicking({ type: 'sensor', label: 'sensor' })}>
         + Sensor
       </Button>
-      <span className={styles.menuAnchor} onKeyDown={(e) => e.key === 'Escape' && setGaugesOpen(false)}>
+      <span ref={anchorRef} className={styles.menuAnchor}>
         <Button
+          ref={gaugeButtonRef}
           type="button"
           variant="secondary"
           aria-haspopup="menu"
           aria-expanded={gaugesOpen}
+          aria-controls={gaugesOpen ? menuId : undefined}
           onClick={() => setGaugesOpen((o) => !o)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              setGaugesOpen(true);
+            }
+          }}
         >
           + Gauge ▸
         </Button>
         {gaugesOpen && (
-          <span role="menu" aria-label="Gauge type" className={styles.menu}>
+          <span ref={menuRef} id={menuId} role="menu" aria-label="Gauge type" className={styles.menu} onKeyDown={onMenuKeyDown}>
             {GAUGES.map((g) => (
               <button
                 key={g.type}
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 className={styles.menuItem}
                 onClick={() => {
-                  setGaugesOpen(false);
+                  // Focus goes back to the button first, so the picker returns it there when it closes.
+                  closeGauges();
                   setPicking({ type: g.type, label: g.label.toLowerCase() });
                 }}
               >

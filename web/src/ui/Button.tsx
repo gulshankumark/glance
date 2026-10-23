@@ -4,13 +4,10 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   variant?: 'primary' | 'secondary' | 'danger';
 }
 
-export const Button: React.FC<ButtonProps> = ({
-  children,
-  variant = 'primary',
-  style,
-  disabled,
-  ...props
-}) => {
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { children, variant = 'primary', style, disabled, ...props },
+  ref,
+) {
   const baseStyle: React.CSSProperties = {
     padding: '8px 16px',
     borderRadius: 'var(--radius)',
@@ -41,8 +38,8 @@ export const Button: React.FC<ButtonProps> = ({
   }
 
   return (
-    <button style={{ ...baseStyle, ...variantStyle }} disabled={disabled} {...props}>
+    <button ref={ref} style={{ ...baseStyle, ...variantStyle }} disabled={disabled} {...props}>
       {children}
     </button>
   );
-};
+});
