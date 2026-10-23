@@ -108,6 +108,7 @@ const ThresholdsEditor: React.FC<{ value: Threshold[]; unit: Settings['unit'] | 
       {value.map((t, i) => (
         <div key={keys.current[i]} className={styles.thresholdRow}>
           <NumberInput
+            key={unit ?? 'raw'} // remount on unit change so focused text is never re-read in the new unit
             aria-label={`Threshold ${i + 1} from`}
             field={thresholdFromField}
             value={unit ? toShownTemperature(t.from, unit) : t.from}
@@ -212,6 +213,7 @@ export const Properties: React.FC<PropertiesProps> = ({ item, data, onChange, im
           return (
             <FieldBox key={f.key} label={`${f.label} (${UNIT_LABEL[unit]})`}>
               <NumberInput
+                key={unit} // remount on unit change so focused text is never re-read in the new unit
                 field={f}
                 value={stored === null || stored === undefined ? stored : toShownTemperature(stored, unit)}
                 onCommit={(n) => set(f.key, n === null ? null : fromShownTemperature(n, unit))}

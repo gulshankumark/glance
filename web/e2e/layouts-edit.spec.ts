@@ -317,6 +317,16 @@ test.describe('Layouts editing: properties and items', () => {
     await api.sendEvent('devices', api.devices);
     await expect(props(page).getByLabel('Maximum (°C)')).toHaveValue('100');
     await expect(props(page).getByLabel('Threshold 1 from')).toHaveValue('37.78');
+
+    // A unit change while a field is focused must not re-read its text in the new unit.
+    await props(page).getByLabel('Maximum (°C)').focus();
+    api.settings.unit = 'fahrenheit';
+    await api.sendEvent('devices', api.devices);
+    await expect(props(page).getByLabel('Maximum (°F)')).toHaveValue('212');
+    await page.locator('body').click({ position: { x: 1, y: 1 } });
+    await page.waitForTimeout(400);
+    expect(itemOf(api, 'bar1')?.max).toBe(100);
+    expect(itemOf(api, 'bar1')?.thresholds).toEqual([{ from: 37.78, color: '#FF4444' }]);
   });
 
   test('items list selects and deletes from the keyboard', async ({ page }) => {
