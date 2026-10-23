@@ -126,4 +126,63 @@ test.describe('Sensors tab', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
+
+  test('a role pinned earlier shows its sensor selected, not Automatic', async ({ page }) => {
+    const sensors: SensorsResponse = {
+      sensors: [
+        { id: 'a', hardware: 'H', hardwareKind: 'cpu', name: 'Alpha', kind: 'load', unit: '%', value: 1, alias: null },
+        { id: 'b', hardware: 'H', hardwareKind: 'cpu', name: 'Beta', kind: 'load', unit: '%', value: 2, alias: null },
+      ],
+      roles: { 'cpu.load': 'b' },
+      pins: { 'cpu.load': 'b' },
+      diagnostics: [],
+    };
+    await mockApi(page, { sensors });
+    await page.goto('/#sensors');
+    await expect(page.getByLabel('CPU load')).toHaveValue('b');
+  });
+
+  test('a live sensors event does not clobber the alias being typed', async ({ page }) => {
+    await mockApi(page);
+    await page.goto('/#sensors');
+    await editAlias(page, 'CPU Package').click();
+    await aliasInput(page).fill('half typed');
+    await page.evaluate(() => {
+      const es = (window as unknown as { __mockEventSource: EventTarget }).__mockEventSource;
+      es.dispatchEvent(new MessageEvent('sensors', { data: JSON.stringify({ 'cpu/t': 72 }) }));
+    });
+    await expect(row(page, 'cpu/t')).toContainText('72');
+    await expect(aliasInput(page)).toHaveValue('half typed');
+  });
+
+  test('the edit button name contains its visible text and focus returns after Save and Escape', async ({ page }) => {
+    await mockApi(page);
+    await page.goto('/#sensors');
+    // label-in-name: the visible alias is part of the accessible name
+    await expect(page.getByRole('button', { name: 'CPU Die', exact: false }).first()).toBeVisible();
+    const button = editAlias(page, 'CPU Package');
+    await expect(button).toHaveText('CPU');
+    await expect(page.getByRole('button', { name: /^CPU .*edit alias of CPU Package$/ })).toHaveCount(1);
+    await button.click();
+    await aliasInput(page).press('Escape');
+    await expect(button).toBeFocused();
+    await button.click();
+    await aliasInput(page).fill('Saved');
+    await aliasInput(page).press('Enter');
+    await expect(editAlias(page, 'CPU Package')).toBeFocused();
+  });
+
+  test('the active tab link is scrolled into view in the nav at 360 px', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await mockApi(page);
+    await page.goto('/#settings');
+    const inView = await page.evaluate(() => {
+      const nav = document.querySelector('nav') as HTMLElement;
+      const link = nav.querySelector('[aria-current="page"]') as HTMLElement;
+      const n = nav.getBoundingClientRect();
+      const l = link.getBoundingClientRect();
+      return l.left >= n.left - 1 && l.right <= n.right + 1;
+    });
+    expect(inView).toBe(true);
+  });
 });
