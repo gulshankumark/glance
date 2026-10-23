@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { SensorsResponse } from '../api/types';
 import { formatValue } from '../lib/format';
 import { useSensorValues } from '../live/LiveProvider';
@@ -23,6 +23,43 @@ interface Leaf {
   initial: number | null;
 }
 
+/** The tree's groups and leaves filtered by `query`; rebuilt only when the catalog or the query change. */
+export function useTreeGroups(catalog: SensorsResponse | null, query: string): Array<{ label: string; leaves: Leaf[] }> {
+  return useMemo(() => {
+    if (!catalog) return [];
+    const byId = new Map(catalog.sensors.map((s) => [s.id, s]));
+    const roles: Leaf[] = Object.entries(catalog.roles).map(([role, id]) => {
+      const target = id ? byId.get(id) : undefined;
+      return {
+        ref: ROLE_PREFIX + role,
+        label: roleLabel(role),
+        search: `${roleLabel(role)} ${role}`,
+        detail: target ? displayName(target) : 'not available',
+        sensorId: target?.id ?? null,
+        unit: target?.unit ?? null,
+        initial: target?.value ?? null,
+      };
+    });
+    return [
+      { label: 'Roles', leaves: roles },
+      ...sensorGroups(catalog).map((g) => ({
+        label: g.label,
+        leaves: g.sensors.map<Leaf>((s) => ({
+          ref: s.id,
+          label: displayName(s),
+          search: `${displayName(s)} ${s.name} ${s.hardware}`,
+          detail: s.alias ? s.name : null,
+          sensorId: s.id,
+          unit: s.unit,
+          initial: s.value,
+        })),
+      })),
+    ]
+      .map((g) => ({ ...g, leaves: g.leaves.filter((l) => matches(l.search, query)) }))
+      .filter((g) => g.leaves.length > 0);
+  }, [catalog, query]);
+}
+
 /**
  * Sensors grouped by hardware kind plus a "Roles" group, with live values and a search box. Each sensor can be
  * dragged onto the canvas (dataTransfer SENSOR_DRAG_TYPE) or clicked to add it.
@@ -31,38 +68,8 @@ export const SensorTree: React.FC<SensorTreeProps> = ({ catalog, onAdd }) => {
   const [query, setQuery] = useState('');
   const values = useSensorValues();
 
+  const groups = useTreeGroups(catalog, query);
   if (!catalog) return <p className={styles.muted}>Loading sensors…</p>;
-
-  const byId = new Map(catalog.sensors.map((s) => [s.id, s]));
-  const roles: Leaf[] = Object.entries(catalog.roles).map(([role, id]) => {
-    const target = id ? byId.get(id) : undefined;
-    return {
-      ref: ROLE_PREFIX + role,
-      label: roleLabel(role),
-      search: `${roleLabel(role)} ${role}`,
-      detail: target ? displayName(target) : 'not available',
-      sensorId: target?.id ?? null,
-      unit: target?.unit ?? null,
-      initial: target?.value ?? null,
-    };
-  });
-  const groups = [
-    { label: 'Roles', leaves: roles },
-    ...sensorGroups(catalog).map((g) => ({
-      label: g.label,
-      leaves: g.sensors.map<Leaf>((s) => ({
-        ref: s.id,
-        label: displayName(s),
-        search: `${displayName(s)} ${s.name} ${s.hardware}`,
-        detail: s.alias ? s.name : null,
-        sensorId: s.id,
-        unit: s.unit,
-        initial: s.value,
-      })),
-    })),
-  ]
-    .map((g) => ({ ...g, leaves: g.leaves.filter((l) => matches(l.search, query)) }))
-    .filter((g) => g.leaves.length > 0);
 
   const valueOf = (leaf: Leaf) => {
     if (!leaf.sensorId) return null;

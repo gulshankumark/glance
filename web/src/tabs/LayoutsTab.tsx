@@ -14,6 +14,7 @@ import { Properties } from '../editor/Properties';
 import { SensorTree } from '../editor/SensorTree';
 import { clearStash, readStash, writeStash } from '../editor/draftStash';
 import { setNavBlocker } from '../lib/navGuard';
+import { useDirty } from '../editor/useDirty';
 import { useEditorData } from '../editor/useEditorData';
 import { useDevices } from '../live/LiveProvider';
 import { Banner } from '../ui/Banner';
@@ -209,7 +210,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
 
   const selected = doc?.draft.items.find((i) => i.id === selectedId) ?? null;
 
-  const dirty = doc !== null && (doc.savedName === null || JSON.stringify(doc.draft) !== doc.saved);
+  const dirty = useDirty(doc?.draft ?? null, doc?.saved ?? '', doc?.savedName === null);
 
   // Every edit is stashed, so leaving without a prompt (a 401, Back) loses nothing; a clean editor clears it.
   useEffect(() => {
