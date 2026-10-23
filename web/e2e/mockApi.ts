@@ -23,6 +23,8 @@ export interface MockApiOptions {
   sensors?: SensorsResponse;
   /** While set, PUT /api/sensors/alias and PUT /api/roles/{role} answer 400 {error}; may be changed while a test runs. */
   sensorWriteError?: string;
+  /** While set, PUT /api/devices/{key} answers 400 {errors: [deviceWriteError]}; may be changed while a test runs. */
+  deviceWriteError?: string;
   /** Stored assets (default: seedAssets()). */
   assets?: Asset[];
   /** While set, POST /api/assets answers this status with {error}; may be changed while a test runs. */
@@ -370,6 +372,10 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       const dev = devices.find((d) => d.key === key);
       if (!dev) {
         await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown device' }) });
+        return;
+      }
+      if (opts.deviceWriteError) {
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ errors: [opts.deviceWriteError] }) });
         return;
       }
       const patch = body as { rotation?: 0 | 90 | 180 | 270; activeLayout?: string | null };
