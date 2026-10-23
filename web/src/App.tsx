@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { navBlocked } from './lib/navGuard';
 import { LiveProvider, useLiveStatus } from './live/LiveProvider';
 import { Banner } from './ui/Banner';
 import { DisplayTab } from './tabs/DisplayTab';
@@ -11,10 +12,18 @@ import './ui/tokens.css';
 
 export function useHashRoute(): [string, (hash: string) => void] {
   const [route, setRoute] = useState(() => window.location.hash || '#display');
+  const routeRef = useRef(route);
+  routeRef.current = route;
 
   useEffect(() => {
     const onHashChange = () => {
-      setRoute(window.location.hash || '#display');
+      const next = window.location.hash || '#display';
+      if (next !== routeRef.current && navBlocked(next)) {
+        // Held back (unsaved work asks first): show the previous address again without a new history entry.
+        window.history.replaceState(null, '', routeRef.current);
+        return;
+      }
+      setRoute(next);
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);

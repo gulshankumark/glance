@@ -13,6 +13,7 @@ import { addItem, newLayout, removeItem, sensorItem, updateItem } from '../edito
 import { Properties } from '../editor/Properties';
 import { SensorTree } from '../editor/SensorTree';
 import { clearStash, readStash, writeStash } from '../editor/draftStash';
+import { setNavBlocker } from '../lib/navGuard';
 import { useEditorData } from '../editor/useEditorData';
 import { useDevices } from '../live/LiveProvider';
 import { Banner } from '../ui/Banner';
@@ -235,6 +236,18 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const guardRef = useRef(guard);
   guardRef.current = guard;
 
+  // Back, Forward or a typed hash with unsaved edits asks first. The login page (a 401) is never held back: the
+  // draft is stashed and restored afterwards.
+  useEffect(() => {
+    if (!dirty) return;
+    setNavBlocker((hash) => {
+      if (hash.startsWith('#layouts') || hash.startsWith('#login')) return false;
+      setPending({ run: () => navigate(hash), errors: [] });
+      return true;
+    });
+    return () => setNavBlocker(null);
+  }, [dirty, navigate]);
+
   // Switching tab through the app's links with unsaved edits asks first.
   useEffect(() => {
     if (!dirty) return;
@@ -283,6 +296,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
       return;
     }
     setPending(null);
+    setNavBlocker(null);
     pending.run();
   };
 
@@ -293,6 +307,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     setSelectedId(null);
     setSaveErrors([]);
     setPending(null);
+    setNavBlocker(null);
     pending.run();
   };
 

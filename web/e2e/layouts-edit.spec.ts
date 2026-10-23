@@ -524,6 +524,44 @@ test.describe('Layouts editing: unsaved changes', () => {
     expect(await closing()).toBe(false);
   });
 
+  test('Back and a typed hash with unsaved edits ask first', async ({ page }) => {
+    const api = await mockApi(page);
+    await page.goto('/#display');
+    await page.locator('nav a[href="#layouts"]').click();
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await editDefault(page, api, 41);
+
+    // Typed hash: Cancel keeps the editor and the edits.
+    await page.evaluate(() => {
+      window.location.hash = '#sensors';
+    });
+    await expect(guard(page)).toBeVisible();
+    await expect(page).toHaveURL(/#layouts$/);
+    await guard(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page).toHaveURL(/#layouts$/);
+    await expect(unsaved(page)).toBeVisible();
+
+    // Typed hash: Save stores the edits, then goes there.
+    await page.evaluate(() => {
+      window.location.hash = '#sensors';
+    });
+    await guard(page).getByRole('button', { name: 'Save' }).click();
+    await expect(page).toHaveURL(/#sensors$/);
+    expect(titleX(api.layouts.get('Default'))).toBe(41);
+
+    // Back: Discard drops the edits and goes back.
+    await page.locator('nav a[href="#layouts"]').click();
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await editDefault(page, api, 42);
+    await page.goBack();
+    await expect(guard(page)).toBeVisible();
+    await expect(page.getByTestId('layout-title')).toContainText('Default');
+    await guard(page).getByRole('button', { name: 'Discard' }).click();
+    await expect(page).toHaveURL(/#sensors$/);
+    expect(titleX(api.layouts.get('Default'))).toBe(41);
+    expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  });
+
   test('draft restored after login redirect', async ({ page }) => {
     const api = await mockApi(page, { loopback: false, networkAccess: true, authenticated: true });
     await openLayout(page, 'Default');
