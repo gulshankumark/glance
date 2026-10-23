@@ -188,6 +188,35 @@ public class DisplaySessionTests
         await h.Stop(run);
     }
 
+    [Fact] public async Task Temperature_unit_change_re_renders_the_active_layout_at_once()
+    {
+        using var h = new SessionHarness(layoutJson: StillWithSensor);
+        h.Values["cpu/t"] = 50;
+        var run = h.Start();
+        await h.Advance(TimeSpan.FromMilliseconds(500));
+        var sent = h.Conn.Frames.Count;
+        h.Settings.Update(s => s.Unit = TemperatureUnit.Fahrenheit);
+        await h.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(2, h.RenderCount);
+        Assert.Equal(sent + 1, h.Conn.Frames.Count);
+        Assert.NotEqual(h.Conn.Frames[0].Data.ToArray(), h.Conn.Frames[^1].Data.ToArray());
+        await h.Stop(run);
+    }
+
+    [Fact] public void Overlay_key_follows_the_temperature_unit()
+    {
+        var src = new FakeSensorSource(("cpu/t", "cpu", SensorKind.Temperature));
+        var hub = HubFactory.NewHub(src);
+        hub.SetInterest(new Dictionary<string, int> { ["cpu/t"] = 0 });
+        src.Values["cpu/t"] = 50; hub.Tick();
+        var layout = GlanceJson.Deserialize<Layout>(StillWithSensor)!;
+        string Key(TemperatureUnit unit) => OverlayKey.Compute(layout,
+            new RenderContext(hub, new AppSettings { Unit = unit }, DateTimeOffset.UnixEpoch, new FakeAssetStore(), new FontProvider()),
+            new OverlayRenderer());
+        Assert.Contains("122 °F", Key(TemperatureUnit.Fahrenheit));
+        Assert.NotEqual(Key(TemperatureUnit.Celsius), Key(TemperatureUnit.Fahrenheit));
+    }
+
     [Fact] public async Task Session_registers_its_sensor_interest_and_clears_it_when_it_ends()
     {
         using var h = new SessionHarness(layoutJson: StillWithSensor);
