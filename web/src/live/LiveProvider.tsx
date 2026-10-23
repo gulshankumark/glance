@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api, notifyUnauthorized } from '../api/client';
 import type { AuthState, DeviceView } from '../api/types';
 
@@ -13,17 +13,28 @@ export interface LiveContextValue {
   devices: DeviceView[] | null;
 }
 
-export const LiveContext = createContext<LiveContextValue>({
-  status: 'connecting',
-  stale: true,
-  sensorValues: {},
-  devices: null,
-});
+// Three contexts, so a sensors tick (every second) re-renders only the components that read sensor values.
+const StatusContext = createContext<{ status: LiveStatus; stale: boolean }>({ status: 'connecting', stale: true });
+const SensorValuesContext = createContext<Record<string, number | null>>({});
+const DevicesContext = createContext<DeviceView[] | null>(null);
 
-export const useLiveStatus = () => useContext(LiveContext).status;
-export const useLiveStale = () => useContext(LiveContext).stale;
-export const useSensorValues = () => useContext(LiveContext).sensorValues;
-export const useDevices = () => useContext(LiveContext).devices;
+export const useLiveStatus = () => useContext(StatusContext).status;
+export const useLiveStale = () => useContext(StatusContext).stale;
+export const useSensorValues = () => useContext(SensorValuesContext);
+export const useDevices = () => useContext(DevicesContext);
+
+/** Provides live state to the hooks above (LiveProvider uses it; tests can give a fixed state). */
+export const LiveStateProvider: React.FC<{ value: LiveContextValue; children: React.ReactNode }> = ({ value, children }) => {
+  const { status, stale, sensorValues, devices } = value;
+  const statusValue = useMemo(() => ({ status, stale }), [status, stale]);
+  return (
+    <StatusContext.Provider value={statusValue}>
+      <SensorValuesContext.Provider value={sensorValues}>
+        <DevicesContext.Provider value={devices}>{children}</DevicesContext.Provider>
+      </SensorValuesContext.Provider>
+    </StatusContext.Provider>
+  );
+};
 
 const BACKOFF_MS = [1000, 2000, 5000];
 
@@ -105,6 +116,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const stale = status !== 'open' || !fresh;
 
   return (
-    <LiveContext.Provider value={{ status, stale, sensorValues, devices }}>{children}</LiveContext.Provider>
+    <LiveStateProvider value={{ status, stale, sensorValues, devices }}>{children}</LiveStateProvider>
   );
 };

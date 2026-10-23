@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
-import { LiveProvider, useLiveStale, useLiveStatus, useSensorValues } from './LiveProvider';
+import React from 'react';
+import { LiveProvider, useDevices, useLiveStale, useLiveStatus, useSensorValues } from './LiveProvider';
 import { resetUnauthorizedHandler, setUnauthorizedHandler } from '../api/client';
 
 class FakeEventSource extends EventTarget {
@@ -155,5 +156,41 @@ describe('LiveProvider', () => {
 
     expect(onUnauthorized).not.toHaveBeenCalled();
     expect(FakeEventSource.instances).toHaveLength(2);
+  });
+});
+
+describe('LiveProvider re-renders', () => {
+  it('a sensors tick does not re-render components that only use devices or the status', () => {
+    let deviceRenders = 0;
+    let statusRenders = 0;
+    const DevicesOnly = React.memo(() => {
+      deviceRenders++;
+      useDevices();
+      return null;
+    });
+    const StatusOnly = React.memo(() => {
+      statusRenders++;
+      useLiveStatus();
+      useLiveStale();
+      return null;
+    });
+    render(
+      <LiveProvider>
+        <DevicesOnly />
+        <StatusOnly />
+        <Probe />
+      </LiveProvider>,
+    );
+    act(() => latest().open());
+    act(() => latest().emit('sensors', { 'cpu/t': 50 }));
+    const devicesBefore = deviceRenders;
+    const statusBefore = statusRenders;
+
+    act(() => latest().emit('sensors', { 'cpu/t': 51 }));
+    act(() => latest().emit('sensors', { 'cpu/t': 52 }));
+
+    expect(probe().dataset.cpu).toBe('52');
+    expect(deviceRenders).toBe(devicesBefore);
+    expect(statusRenders).toBe(statusBefore);
   });
 });

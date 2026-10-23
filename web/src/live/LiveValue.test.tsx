@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { LiveContext, type LiveContextValue } from './LiveProvider';
+import { LiveStateProvider, type LiveContextValue } from './LiveProvider';
 import { LiveValue } from './LiveValue';
 
 const renderWith = (value: Partial<LiveContextValue>) =>
   render(
-    <LiveContext.Provider value={{ status: 'open', stale: false, sensorValues: {}, devices: null, ...value }}>
+    <LiveStateProvider value={{ status: 'open', stale: false, sensorValues: {}, devices: null, ...value }}>
       <LiveValue>61 °C</LiveValue>
-    </LiveContext.Provider>,
+    </LiveStateProvider>,
   );
 
 describe('LiveValue', () => {
