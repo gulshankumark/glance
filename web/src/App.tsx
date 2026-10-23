@@ -66,6 +66,11 @@ const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
     currentTab = <DisplayTab navigate={navigate} />;
   }
 
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [baseRoute]);
+
   const isCurrentTab = (hash: string) => {
     if (hash === '#display' && (baseRoute === '#display' || baseRoute === '')) return true;
     if (hash === '#layouts' && baseRoute.startsWith('#layouts')) return true;
@@ -98,7 +103,7 @@ const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
             </span>
           </div>
 
-          <nav style={{ display: 'flex', gap: 'var(--space-1)', maxWidth: '100%', overflowX: 'auto' }}>
+          <nav ref={navRef} style={{ display: 'flex', gap: 'var(--space-1)', maxWidth: '100%', overflowX: 'auto' }}>
             {navLinks.map((link) => {
               const active = isCurrentTab(link.hash);
               return (
