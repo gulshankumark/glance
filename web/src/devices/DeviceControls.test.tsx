@@ -6,6 +6,7 @@ import { LayoutSelect } from './DeviceControls';
 const device: DeviceView = {
   key: 'k', driverId: 'd', name: 'n', status: 'connected', width: 480, height: 480, modelCode: 'm', serial: 's',
   message: null, nextRetry: null, rotation: 0, activeLayout: 'Gaming', layoutMismatch: false, fps: 0, framesSent: 0,
+  gamma: 1, brightness: 100,
 };
 
 describe('LayoutSelect', () => {

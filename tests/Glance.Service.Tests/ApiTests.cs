@@ -101,6 +101,67 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task Device_calibration_round_trips_and_is_validated()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        var d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(1.0, d.GetProperty("gamma").GetDouble());
+        Assert.Equal(100, d.GetProperty("brightness").GetInt32());
+
+        var ok = await c.PutAsync($"/api/devices/{key}", Json(new { gamma = 2.2, brightness = 80 }));
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal(2.2, (await ok.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("gamma").GetDouble());
+        d = (await c.GetFromJsonAsync<JsonElement>("/api/devices"))[0];
+        Assert.Equal(2.2, d.GetProperty("gamma").GetDouble());
+        Assert.Equal(80, d.GetProperty("brightness").GetInt32());
+
+        foreach (var (body, error) in new[]
+        {
+            ("""{"gamma":0}""", "gamma must be 0.5..3"),
+            ("""{"gamma":3.5}""", "gamma must be 0.5..3"),
+            ("""{"gamma":"NaN"}""", "gamma must be 0.5..3"),
+            ("""{"gamma":"Infinity"}""", "gamma must be 0.5..3"),
+            ("""{"brightness":5}""", "brightness must be 10..100"),
+            ("""{"brightness":101}""", "brightness must be 10..100"),
+        })
+        {
+            var r = await c.PutAsync($"/api/devices/{key}", Json(body));
+            Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+            Assert.Equal(error, (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync($"/api/devices/{key}", Json("""{"gamma":"bright"}"""))).StatusCode);
+        Assert.Equal(2.2, f.Settings.Current.Devices[key].Gamma);
+        Assert.Equal(80, f.Settings.Current.Devices[key].Brightness);
+    }
+
+    [Fact]
+    public async Task Test_pattern_starts_and_stops_and_unknown_device_is_404()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        for (var i = 0; i < 100 && f.Services.GetRequiredService<Glance.Core.Sessions.DeviceManager>().Session(key) is null; i++) await Task.Delay(50);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/devices/{key}/test-pattern", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/devices/{key}/test-pattern")).StatusCode);
+        var unknown = await c.PostAsync("/api/devices/unknown/test-pattern", null);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal("unknown device", (await unknown.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync("/api/devices/unknown/test-pattern")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Render_is_not_affected_by_device_calibration()
+    {
+        await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();
+        var key = await FirstDeviceKey(c);
+        async Task<byte[]> Render() =>
+            await (await c.PostAsync($"/api/render?device={key}", Json(SampleLayout("Draft")))).Content.ReadAsByteArrayAsync();
+        var before = await Render();
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/devices/{key}", Json(new { gamma = 2.5, brightness = 40 }))).StatusCode);
+        Assert.Equal(before, await Render());
+    }
+
+    [Fact]
     public async Task Devices_report_fps()
     {
         await using var f = new GlanceFactory(withDevice: true); var c = f.CreateClient();

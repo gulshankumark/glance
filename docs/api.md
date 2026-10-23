@@ -189,7 +189,8 @@ then label. Every id is valid as a clock item's `timeZone`.
 ```json
 [{"key": "thermalright-hid-5302_ABC123", "driverId": "thermalright-hid-5302", "name": "...", "status": "connected",
   "width": 1280, "height": 480, "modelCode": "...", "serial": "...", "message": null, "nextRetry": null,
-  "rotation": 0, "activeLayout": "Gaming", "layoutMismatch": false, "fps": 9.8, "framesSent": 1234}]
+  "rotation": 0, "activeLayout": "Gaming", "layoutMismatch": false, "fps": 9.8, "framesSent": 1234,
+  "gamma": 1.0, "brightness": 100}]
 ```
 
 - `status`: `connected|unsupported|retrying`; `message` explains the last problem, `nextRetry` is an ISO time or `null`.
@@ -199,13 +200,32 @@ then label. Every id is valid as a clock item's `timeZone`.
 - `layoutMismatch`: the active layout's size differs from the rotated canvas (width/height swapped for 90 and 270).
 - `fps`: frames sent per second over the last 5 s; `framesSent`: frames since the session started. Both 0 without a
   running session.
+- `gamma` (0.5–3, default 1.0) and `brightness` (10–100 %, default 100): colour calibration of the bytes sent to that
+  screen. Each colour channel v becomes `round(255 · brightness/100 · (v/255)^gamma)`; gamma above 1 darkens dark
+  tones. It applies only to frames sent to the device (still, fallback, animated, passthrough and test pattern), never
+  to `/api/preview/{key}.jpg`, `/api/render` or the editor, which match a normal monitor. The defaults skip the pass.
 
 ### PUT /api/devices/{key}
 
-Body `{"rotation": 90, "activeLayout": "Gaming"}`. Each field is optional: absent = unchanged.
-`"activeLayout": null` (explicitly present) clears the active layout. Responses: `200` the updated device (as in GET);
+Body `{"rotation": 90, "activeLayout": "Gaming", "gamma": 2.2, "brightness": 80}`. Each field is optional: absent =
+unchanged. `"activeLayout": null` (explicitly present) clears the active layout. A calibration change applies to the
+next frame without reconnecting. Responses: `200` the updated device (as in GET);
 `404 {"error":"unknown device"}`; `400 {"error":"rotation must be 0, 90, 180 or 270"}`;
-`400 {"error":"layout 'X' does not exist"}`; `400 {"error":"activeLayout must be a layout name or null"}`.
+`400 {"error":"layout 'X' does not exist"}`; `400 {"error":"activeLayout must be a layout name or null"}`;
+`400 {"error":"gamma must be 0.5..3"}` (also for `"NaN"` and `"Infinity"`); `400 {"error":"brightness must be 10..100"}`.
+
+### POST /api/devices/{key}/test-pattern
+
+No body. Shows a full-screen test pattern on that screen for 120 s (or until `DELETE`): 16 grey steps from 0 to 255
+across the top half; the bottom half split into black, `#101820` (the default layout background), `#33FFFFFF` over
+`#101820` (the default track colour) and white, each labelled. Drawn in layout orientation, then rotated and
+calibrated like any frame; the preview shows it too. In memory only (not saved; a reconnect ends it). Responses:
+`204`; `404 {"error":"unknown device"}` for an unknown or disconnected key.
+
+### DELETE /api/devices/{key}/test-pattern
+
+Ends the test pattern now; the layout returns at once. `204` (also when no pattern is showing);
+`404 {"error":"unknown device"}` for an unknown or disconnected key.
 
 ### GET /api/preview/{key}.jpg
 

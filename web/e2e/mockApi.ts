@@ -152,6 +152,8 @@ export function seedDevice(overrides: Partial<DeviceView> = {}): DeviceView {
     layoutMismatch: false,
     fps: 10.0,
     framesSent: 1234,
+    gamma: 1.0,
+    brightness: 100,
     ...overrides,
   };
 }
