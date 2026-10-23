@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, getBlob } from '../api/client';
 import type { AuthState, Settings } from '../api/types';
-import { serviceAddress } from '../lib/serviceAddress';
+import { isLoopbackHost, serviceAddress } from '../lib/serviceAddress';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -254,7 +254,10 @@ type NetworkResult = Pick<Settings, 'networkAccess' | 'https' | 'port'>;
 
 const NetworkForm: React.FC<{
   settings: Settings;
-  /** The page is used from another device (not loopback): turning network access off locks it out. */
+  /**
+   * The page is used from another device: turning network access off locks it out. Without an auth state answer
+   * this fails safe (remote unless the host name is a loopback one).
+   */
   remote: boolean;
   onSaved: (s: Settings) => void;
 }> = ({ settings, remote, onSaved }) => {
@@ -519,7 +522,7 @@ export const SettingsTab: React.FC<{ navigate: (hash: string) => void }> = ({ na
                 hasPassword={settings.hasPassword}
                 onSaved={() => setSettings((s) => (s ? { ...s, hasPassword: true } : s))}
               />
-              <NetworkForm settings={settings} remote={!!auth && !auth.loopback} onSaved={setSettings} />
+              <NetworkForm settings={settings} remote={auth ? !auth.loopback : !isLoopbackHost(window.location.hostname)} onSaved={setSettings} />
               {auth?.authenticated && !auth.loopback && <LogoutButton navigate={navigate} />}
             </Card>
           )}

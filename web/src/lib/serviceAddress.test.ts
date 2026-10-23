@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { serviceAddress } from './serviceAddress';
+import { isLoopbackHost, serviceAddress } from './serviceAddress';
 
 describe('serviceAddress', () => {
   it('keeps a remote IPv4 host and applies scheme and port', () => {
@@ -18,5 +18,17 @@ describe('serviceAddress', () => {
 
   it('falls back to localhost for an empty host name', () => {
     expect(serviceAddress('', false, 8735)).toBe('http://localhost:8735/#settings');
+  });
+});
+
+describe('isLoopbackHost', () => {
+  it('accepts localhost, 127.0.0.1 and ::1 with or without brackets', () => {
+    for (const host of ['localhost', 'LOCALHOST', '127.0.0.1', '[::1]', '::1']) expect(isLoopbackHost(host)).toBe(true);
+  });
+
+  it('rejects other hosts', () => {
+    for (const host of ['192.168.1.20', 'my-pc.local', '[fe80::1]', 'glance.test', '']) {
+      expect(isLoopbackHost(host)).toBe(false);
+    }
   });
 });

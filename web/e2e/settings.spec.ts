@@ -257,6 +257,43 @@ test.describe('Settings Tab', () => {
     await expect(page.getByText('The page will reload at the new address')).toHaveCount(0);
   });
 
+  // Without an auth state answer the confirm fails safe: only a loopback host name skips it.
+  for (const authState of ['pending', '500'] as const) {
+    test(`auth state ${authState}: a non-loopback host asks before turning network access off`, async ({ page }) => {
+      const api = await mockApi(page);
+      // Serve the app under a non-loopback host name; /api requests fall through to the mock.
+      await page.route(/^http:\/\/glance\.test:4173\//, async (route) => {
+        const url = route.request().url();
+        if (new URL(url).pathname.startsWith('/api/')) return route.fallback();
+        const response = await route.fetch({ url: url.replace('glance.test', 'localhost') });
+        return route.fulfill({ response });
+      });
+      await page.route('**/api/auth/state', (route) =>
+        authState === '500' ? route.fulfill({ status: 500, body: '' }) : new Promise<void>(() => undefined),
+      );
+      await page.goto('http://glance.test:4173/#settings');
+      const access = section(page, 'Access');
+      await access.getByLabel('Allow access from other devices on the network').uncheck();
+      await access.getByRole('button', { name: 'Save network settings' }).click();
+      await expect(page.getByRole('dialog', { name: 'Turn off network access?' })).toBeVisible();
+      expect(api.calls.filter((c) => c.path === '/api/settings/network')).toHaveLength(0);
+    });
+
+    test(`auth state ${authState}: a loopback host does not ask`, async ({ page }) => {
+      const api = await mockApi(page);
+      await page.route('**/api/auth/state', (route) =>
+        authState === '500' ? route.fulfill({ status: 500, body: '' }) : new Promise<void>(() => undefined),
+      );
+      await page.goto('/#settings');
+      const access = section(page, 'Access');
+      await access.getByLabel('Allow access from other devices on the network').uncheck();
+      await access.getByRole('button', { name: 'Save network settings' }).click();
+      await expect(access.getByText('Network settings saved')).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect(api.settings.networkAccess).toBe(false);
+    });
+  }
+
   test('turning network access off on this computer does not ask', async ({ page }) => {
     const api = await mockApi(page);
     await page.goto('/#settings');
