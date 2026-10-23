@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, getBlob } from '../api/client';
 import type { AuthState, Settings } from '../api/types';
+import { serviceAddress } from '../lib/serviceAddress';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -248,12 +249,6 @@ const PasswordForm: React.FC<{ hasPassword: boolean; onSaved: () => void }> = ({
   );
 };
 
-/** The address the UI is served at for the given network settings (current host, or localhost). */
-function addressFor(https: boolean, port: number): string {
-  const host = window.location.hostname || 'localhost';
-  return `${https ? 'https' : 'http'}://${host}:${port}/#settings`;
-}
-
 type NetworkResult = Pick<Settings, 'networkAccess' | 'https' | 'port'>;
 
 const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void }> = ({ settings, onSaved }) => {
@@ -293,7 +288,7 @@ const NetworkForm: React.FC<{ settings: Settings; onSaved: (s: Settings) => void
       // Only a new scheme or port moves the UI; navigate after the user has had a moment to read why.
       if (result.https !== settings.https || result.port !== settings.port) {
         setReloading(true);
-        const target = addressFor(result.https, result.port);
+        const target = serviceAddress(window.location.hostname, result.https, result.port);
         timer.current = window.setTimeout(() => window.location.assign(target), RELOAD_DELAY_MS);
       } else {
         setSaved(true);
