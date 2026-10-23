@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, TOO_MANY_ATTEMPTS } from '../api/client';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Field } from '../ui/Field';
@@ -19,7 +19,9 @@ export const LoginPage: React.FC<{ navigate: (hash: string) => void }> = ({ navi
       await api('POST', '/api/auth/login', { password }, { skipAuthRedirect: true });
       navigate(returnHashFrom(window.location.hash));
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.status === 429) {
+        setError(TOO_MANY_ATTEMPTS);
+      } else if (err instanceof ApiError) {
         setError(err.errors.join(', ') || 'Login failed');
       } else {
         setError('Login failed');

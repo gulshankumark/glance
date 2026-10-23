@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { api, ApiError, getBlob } from '../api/client';
+import { api, ApiError, getBlob, TOO_MANY_ATTEMPTS } from '../api/client';
 import type { AuthState, Settings } from '../api/types';
 import { isLoopbackHost, serviceAddress } from '../lib/serviceAddress';
 import { Banner } from '../ui/Banner';
@@ -197,7 +197,7 @@ const PasswordForm: React.FC<{ hasPassword: boolean; onSaved: () => void }> = ({
       onSaved();
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) setErrors({ current: 'The current password is wrong.' });
-      else setErrors({ form: errorText(err, { 429: 'Too many attempts. Wait a minute and try again.' }) });
+      else setErrors({ form: errorText(err, { 429: TOO_MANY_ATTEMPTS }) });
     } finally {
       setSaving(false);
     }

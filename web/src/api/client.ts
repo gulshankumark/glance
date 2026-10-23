@@ -10,6 +10,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Shown for 429 from the rate-limited password endpoints (the response has no body). */
+export const TOO_MANY_ATTEMPTS = 'Too many attempts. Wait a minute and try again.';
+
 type UnauthorizedHandler = (currentHash: string) => void;
 
 export interface ApiOptions {

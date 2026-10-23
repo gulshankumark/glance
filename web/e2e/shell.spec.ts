@@ -88,6 +88,18 @@ test.describe('App Shell', () => {
     await expect(page).toHaveURL(/#sensors$/);
   });
 
+  test('a rate-limited login says to wait instead of showing the status code', async ({ page }) => {
+    await mockApi(page, { loopback: false, networkAccess: true, authenticated: false, password: 'mypassword' });
+    await page.route('**/api/auth/login', (route) => route.fulfill({ status: 429, body: '' }));
+
+    await page.goto('/#login?return=%23sensors');
+    await page.getByLabel('Password').fill('mypassword');
+    await page.click('button[type="submit"]');
+
+    await expect(page.getByRole('alert')).toHaveText('Too many attempts. Wait a minute and try again.');
+    await expect(page).toHaveURL(/#login\?return=%23sensors$/);
+  });
+
   test('login ignores a return value that is not an app hash', async ({ page }) => {
     await mockApi(page, { loopback: false, networkAccess: true, authenticated: false, password: 'mypassword' });
 
