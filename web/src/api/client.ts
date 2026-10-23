@@ -167,3 +167,8 @@ export async function postBlob(path: string, body: unknown, options: ApiOptions 
   if (!res.ok) return handleResponse<never>(res, options);
   return res.blob();
 }
+
+/** Shows (POST) or ends (DELETE) the full-screen test pattern on a device; the service ends it by itself after 120 s. */
+export function setTestPattern(deviceKey: string, on: boolean): Promise<void> {
+  return api<void>(on ? 'POST' : 'DELETE', `/api/devices/${encodeURIComponent(deviceKey)}/test-pattern`);
+}

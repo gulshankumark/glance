@@ -6,7 +6,7 @@ import { Select } from '../ui/Select';
 
 export const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 
-export type DevicePatch = { rotation?: Rotation; activeLayout?: string | null };
+export type DevicePatch = { rotation?: Rotation; activeLayout?: string | null; gamma?: number; brightness?: number };
 
 /**
  * PUT /api/devices/{key}. The answer is applied through onUpdated at once; a failure is kept in `error`

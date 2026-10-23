@@ -118,4 +118,88 @@ test.describe('Devices Tab', () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
+  test.describe('Screen colour', () => {
+    const colour = (page: Page, key = KEY) => card(page, key).getByRole('group', { name: 'Screen colour' });
+    const patternCalls = (api: { calls: Array<{ method: string; path: string }> }) =>
+      api.calls.filter((c) => c.path === `/api/devices/${KEY}/test-pattern`).map((c) => c.method);
+
+    test('shown only for a connected screen', async ({ page }) => {
+      await mockApi(page, { devices: [seedDevice(), retrying(), unsupported()] });
+      await page.goto('/#devices');
+
+      await expect(colour(page)).toBeVisible();
+      await expect(colour(page).getByLabel('Gamma')).toHaveValue('1');
+      await expect(colour(page)).toContainText('1.00');
+      await expect(colour(page)).toContainText('100%');
+      await expect(colour(page)).toContainText('Raise gamma until the dark grey steps on the screen look like they do here.');
+      await expect(colour(page, 'retry-dev')).toHaveCount(0);
+      await expect(colour(page, 'unsup-dev')).toHaveCount(0);
+    });
+
+    test('the test pattern toggle POSTs, then DELETEs', async ({ page }) => {
+      const api = await mockApi(page);
+      await page.goto('/#devices');
+      const toggle = colour(page).getByRole('button', { name: 'Show test pattern' });
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      expect(patternCalls(api)).toEqual(['POST']);
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      expect(patternCalls(api)).toEqual(['POST', 'DELETE']);
+    });
+
+    test('leaving the tab while the test pattern is on ends it', async ({ page }) => {
+      const api = await mockApi(page);
+      await page.goto('/#devices');
+      const toggle = colour(page).getByRole('button', { name: 'Show test pattern' });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+      await Promise.all([
+        page.waitForRequest((req) => req.url().endsWith('/test-pattern') && req.method() === 'DELETE'),
+        page.getByRole('navigation').getByRole('link', { name: 'Display', exact: true }).click(),
+      ]);
+      expect(patternCalls(api)).toEqual(['POST', 'DELETE']);
+    });
+
+    test('usable by keyboard at 360 px', async ({ page }) => {
+      const api = await mockApi(page);
+      await page.setViewportSize({ width: 360, height: 700 });
+      await page.goto('/#devices');
+
+      const gamma = colour(page).getByLabel('Gamma');
+      await gamma.focus();
+      await Promise.all([
+        page.waitForResponse((res) => res.url().endsWith(`/api/devices/${KEY}`) && res.request().method() === 'PUT'),
+        page.keyboard.press('ArrowRight'),
+      ]);
+      await expect(colour(page)).toContainText('1.05');
+      const puts = api.calls.filter((c) => c.method === 'PUT' && c.path === `/api/devices/${KEY}`);
+      expect(puts.map((c) => c.body)).toEqual([{ gamma: 1.05, brightness: 100 }]);
+
+      await page.keyboard.press('Tab');
+      await expect(colour(page).getByLabel('Brightness')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(colour(page).getByRole('button', { name: 'Reset' })).toBeFocused();
+      await page.keyboard.press('Tab');
+      const toggle = colour(page).getByRole('button', { name: 'Show test pattern' });
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+
+    test('a rejected value shows the server message and restores the saved value', async ({ page }) => {
+      await mockApi(page, { deviceWriteError: 'gamma must be 0.5..3' });
+      await page.goto('/#devices');
+      await colour(page).getByLabel('Gamma').focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(card(page).getByRole('alert')).toContainText('gamma must be 0.5..3');
+      await expect(colour(page).getByLabel('Gamma')).toHaveValue('1');
+    });
+  });
 });
