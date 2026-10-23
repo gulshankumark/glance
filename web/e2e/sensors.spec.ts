@@ -181,3 +181,22 @@ test.describe('Sensors tab', () => {
     expect(inView).toBe(true);
   });
 });
+
+test.describe('Sensors diagnostics', () => {
+  test('each diagnostic is a status message, also with repeated codes', async ({ page }) => {
+    await mockApi(page, {
+      sensors: {
+        sensors: [],
+        roles: {},
+        pins: {},
+        diagnostics: [
+          { code: 'driver', message: 'First problem' },
+          { code: 'driver', message: 'Second problem' },
+        ],
+      },
+    });
+    await page.goto('/#sensors');
+    await expect(page.getByRole('status').filter({ hasText: 'First problem' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Second problem' })).toBeVisible();
+  });
+});

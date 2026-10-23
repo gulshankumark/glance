@@ -104,6 +104,21 @@ const AliasCell: React.FC<{ sensor: Sensor; onSaved: (id: string, alias: string 
   );
 };
 
+/** Sensor diagnostics as status banners (codes may repeat, so the position is part of the key). */
+export const DiagnosticBanners: React.FC<{ diagnostics: SensorsResponse['diagnostics'] }> = ({ diagnostics }) =>
+  diagnostics.length === 0 ? null : (
+    <div className={styles.banners}>
+      {diagnostics.map((d, i) => (
+        <Banner key={`${i}:${d.code}`} role="status" data-testid={`diagnostic-${d.code}`}>
+          <span>
+            {d.message}
+            <span className={styles.bannerNote}>See the installation guide.</span>
+          </span>
+        </Banner>
+      ))}
+    </div>
+  );
+
 export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => {
   const [data, setData] = useState<SensorsResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -158,18 +173,7 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
 
   return (
     <div>
-      {data.diagnostics.length > 0 && (
-        <div className={styles.banners}>
-          {data.diagnostics.map((d) => (
-            <Banner key={d.code} data-testid={`diagnostic-${d.code}`}>
-              <span>
-                {d.message}
-                <span className={styles.bannerNote}>See the installation guide.</span>
-              </span>
-            </Banner>
-          ))}
-        </div>
-      )}
+      <DiagnosticBanners diagnostics={data.diagnostics} />
 
       <Card title="Roles">
         <p className={styles.muted} style={{ marginBottom: 'var(--space-3)' }}>
