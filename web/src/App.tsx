@@ -98,7 +98,7 @@ const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
             </span>
           </div>
 
-          <nav style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          <nav style={{ display: 'flex', gap: 'var(--space-1)', maxWidth: '100%', overflowX: 'auto' }}>
             {navLinks.map((link) => {
               const active = isCurrentTab(link.hash);
               return (
