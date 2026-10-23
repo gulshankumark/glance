@@ -78,6 +78,7 @@ interface DeviceCardProps {
 
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, navigate, onUpdated }) => {
   const rotationLabelId = useId();
+  const rotationErrorId = useId();
   const { update, layoutError, rotationError } = useDeviceUpdate(device, onUpdated);
 
   return (
@@ -136,7 +137,12 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
           <div id={rotationLabelId} className={styles.groupLabel}>
             Rotation
           </div>
-          <div role="group" aria-labelledby={rotationLabelId} className={styles.rotationGroup}>
+          <div
+            role="group"
+            aria-labelledby={rotationLabelId}
+            aria-describedby={rotationError ? rotationErrorId : undefined}
+            className={styles.rotationGroup}
+          >
             <Button variant="primary" onClick={() => update({ rotation: ((device.rotation + 180) % 360) as Rotation })}>
               Flip 180°
             </Button>
@@ -152,7 +158,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
             ))}
           </div>
           {rotationError && (
-            <p role="alert" style={{ marginTop: 'var(--space-1)', fontSize: '0.8rem', color: 'var(--danger)' }}>
+            <p id={rotationErrorId} role="alert" style={{ marginTop: 'var(--space-1)', fontSize: '0.8rem', color: 'var(--danger)' }}>
               {rotationError}
             </p>
           )}

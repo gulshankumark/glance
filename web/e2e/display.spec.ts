@@ -190,3 +190,13 @@ test.describe('Display Tab', () => {
     await expect(page).toHaveURL(/#layouts$/);
   });
 });
+
+test.describe('Display rotation error', () => {
+  test('the alert describes the rotation button group', async ({ page }) => {
+    await mockApi(page, { deviceWriteError: 'Rotation rejected' });
+    await page.goto('/#display');
+    await page.getByRole('button', { name: 'Flip 180°' }).click();
+    await expect(page.getByRole('alert')).toHaveText('Rotation rejected');
+    await expect(page.getByRole('group', { name: 'Rotation' })).toHaveAccessibleDescription('Rotation rejected');
+  });
+});
