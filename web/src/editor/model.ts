@@ -74,17 +74,44 @@ export function removeItem(layout: Layout, id: string): Layout {
   return { ...layout, items: layout.items.filter((i) => i.id !== id) };
 }
 
+/** Moves each listed item by its delta (rounded, clamped like `moveItem`); unknown ids are ignored. */
+export function moveItems(layout: Layout, moves: Record<string, { dx: number; dy: number }>): Layout {
+  let changed = false;
+  const items = layout.items.map((i) => {
+    const m = Object.hasOwn(moves, i.id) ? moves[i.id] : undefined;
+    if (!m) return i;
+    const x = clampPos(i.x + Math.round(m.dx));
+    const y = clampPos(i.y + Math.round(m.dy));
+    if (x === i.x && y === i.y) return i;
+    changed = true;
+    return { ...i, x, y };
+  });
+  return changed ? { ...layout, items } : layout;
+}
+
+export function removeItems(layout: Layout, ids: readonly string[]): Layout {
+  const gone = new Set(ids);
+  return { ...layout, items: layout.items.filter((i) => !gone.has(i.id)) };
+}
+
 /** Copies an item 16 px right and down under a new id; the copy is appended (drawn on top). */
 export function duplicateItem(layout: Layout, id: string): Layout {
-  const src = layout.items.find((i) => i.id === id);
-  if (!src) return layout;
-  let nid = newId();
-  while (layout.items.some((i) => i.id === nid)) nid = newId();
-  const copy = structuredClone(src);
-  return {
-    ...layout,
-    items: [...layout.items, { ...copy, id: nid, x: clampPos(src.x + 16), y: clampPos(src.y + 16) }],
-  };
+  return duplicateItems(layout, [id]).layout;
+}
+
+/** `duplicateItem` for several items at once: copies appended in the layout's order, `newIds` matching them. */
+export function duplicateItems(layout: Layout, ids: readonly string[]): { layout: Layout; newIds: string[] } {
+  const wanted = new Set(ids);
+  const sources = layout.items.filter((i) => wanted.has(i.id));
+  if (sources.length === 0) return { layout, newIds: [] };
+  const taken = new Set(layout.items.map((i) => i.id));
+  const copies = sources.map((src) => {
+    let nid = newId();
+    while (taken.has(nid)) nid = newId();
+    taken.add(nid);
+    return { ...structuredClone(src), id: nid, x: clampPos(src.x + 16), y: clampPos(src.y + 16) };
+  });
+  return { layout: { ...layout, items: [...layout.items, ...copies] }, newIds: copies.map((c) => c.id) };
 }
 
 /** Appends an item (drawn on top) at a whole-pixel, in-bounds position, under a new id if its id is taken. */

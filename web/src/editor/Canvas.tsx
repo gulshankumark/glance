@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, postBlob } from '../api/client';
 import type { Item, Layout } from '../api/types';
 import { SENSOR_DRAG_TYPE } from './catalog';
-import { duplicateItem, moveItem, removeItem, toLayoutPoint } from './model';
+import { duplicateItems, moveItems, removeItems, toLayoutPoint } from './model';
 import { createRenderScheduler, type RenderScheduler } from './scheduler';
 import styles from './Editor.module.css';
 
@@ -123,8 +123,8 @@ export function hitBox(item: Item, rendered: Pick<Rendered, 'bounds' | 'layout'>
 
 export interface CanvasProps {
   layout: Layout;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  selectedIds: readonly string[];
+  onSelect: (ids: string[]) => void;
   onChange: (layout: Layout) => void;
   /** A sensor from the sensor tree was dropped at (x, y) in layout pixels. */
   onDropSensor?: (ref: string, label: string, x: number, y: number) => void;
@@ -133,17 +133,18 @@ export interface CanvasProps {
 }
 
 interface Drag {
-  id: string;
   pointerId: number;
   start: { x: number; y: number };
-  origin: { x: number; y: number };
+  /** Positions of every dragged (selected) item when the drag started. */
+  origins: Record<string, { x: number; y: number }>;
 }
 
 /**
  * The layout as the server draws it, scaled to the available width, with a selection box over every item:
- * click selects, drag moves, arrows nudge (Shift: 10 px), Delete removes, Ctrl/Cmd+D duplicates.
+ * click selects, Shift/Ctrl/Cmd+click adds or removes, drag moves the selection, arrows nudge it (Shift: 10 px),
+ * Delete removes it, Ctrl/Cmd+D duplicates it, Ctrl/Cmd+A selects all, Escape clears.
  */
-export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, onChange, onDropSensor, itemName }) => {
+export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, onChange, onDropSensor, itemName }) => {
   const { rendered, error } = useRenderedDraft(layout);
   const stageRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef(layout);
@@ -160,20 +161,38 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
     e.preventDefault();
     e.stopPropagation();
     stageRef.current?.focus({ preventScroll: true });
-    onSelect(item.id);
+    const was = selectedIds.includes(item.id);
+    let ids: string[];
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      ids = was ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id];
+      onSelect(ids);
+      if (was) return; // taken out of the selection: nothing to drag
+    } else if (!was) {
+      ids = [item.id];
+      onSelect(ids);
+    } else {
+      ids = [...selectedIds];
+    }
+    const origins: Drag['origins'] = {};
+    for (const i of layoutRef.current.items) if (ids.includes(i.id)) origins[i.id] = { x: i.x, y: i.y };
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { id: item.id, pointerId: e.pointerId, start: pointAt(e), origin: { x: item.x, y: item.y } };
+    dragRef.current = { pointerId: e.pointerId, start: pointAt(e), origins };
   };
 
   const onBoxPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
     const p = pointAt(e);
-    const x = Math.round(drag.origin.x + p.x - drag.start.x);
-    const y = Math.round(drag.origin.y + p.y - drag.start.y);
-    const current = layoutRef.current.items.find((i) => i.id === drag.id);
-    if (!current || (current.x === x && current.y === y)) return;
-    onChange(moveItem(layoutRef.current, drag.id, x, y));
+    const dx = Math.round(p.x - drag.start.x);
+    const dy = Math.round(p.y - drag.start.y);
+    // Every dragged item lands at its own origin + the same delta, whatever moves were applied before.
+    const moves: Record<string, { dx: number; dy: number }> = {};
+    for (const i of layoutRef.current.items) {
+      const o = drag.origins[i.id];
+      if (o) moves[i.id] = { dx: o.x + dx - i.x, dy: o.y + dy - i.y };
+    }
+    const next = moveItems(layoutRef.current, moves);
+    if (next !== layoutRef.current) onChange(next);
   };
 
   const endDrag = (e: React.PointerEvent) => {
@@ -181,8 +200,19 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const item = layout.items.find((i) => i.id === selectedId);
-    if (!item) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      onSelect(layout.items.map((i) => i.id));
+      return;
+    }
+    if (e.key === 'Escape' && selectedIds.length > 0) {
+      e.preventDefault();
+      onSelect([]);
+      return;
+    }
+    const ids = layout.items.filter((i) => selectedIds.includes(i.id)).map((i) => i.id);
+    if (ids.length === 0) return;
     const step = e.shiftKey ? 10 : 1;
     const nudge: Record<string, [number, number]> = {
       ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
@@ -190,16 +220,16 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
     if (nudge[e.key]) {
       e.preventDefault();
       const [dx, dy] = nudge[e.key];
-      onChange(moveItem(layout, item.id, item.x + dx, item.y + dy));
+      onChange(moveItems(layout, Object.fromEntries(ids.map((id) => [id, { dx, dy }]))));
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      onSelect(null);
-      onChange(removeItem(layout, item.id));
-    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      onSelect([]);
+      onChange(removeItems(layout, ids));
+    } else if (mod && e.key.toLowerCase() === 'd') {
       e.preventDefault();
-      const next = duplicateItem(layout, item.id);
-      onChange(next);
-      onSelect(next.items[next.items.length - 1].id);
+      const next = duplicateItems(layout, ids);
+      onChange(next.layout);
+      onSelect(next.newIds);
     }
   };
 
@@ -235,8 +265,8 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
   return (
     <div>
       <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
-        Click or tap an item to select it, drag to move. Keys: Arrows move 1 px, Shift+Arrows 10 px, Delete removes,
-        Ctrl+D duplicates.
+        Click or tap an item to select it, drag to move. Shift+click adds to the selection. Keys: Arrows move 1 px,
+        Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears.
       </p>
       <div
         ref={stageRef}
@@ -248,7 +278,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
         onDragOver={onDragOver}
         onDrop={onDrop}
         onPointerDown={(e) => {
-          if (e.button === 0) onSelect(null);
+          if (e.button === 0 && !(e.shiftKey || e.ctrlKey || e.metaKey)) onSelect([]);
         }}
         style={{
           position: 'relative',
@@ -277,7 +307,7 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedId, onSelect, on
           const b = hitBox(item, rendered);
           const h = span(b.x, b.width, layout.width);
           const v = span(b.y, b.height, layout.height);
-          const selected = item.id === selectedId;
+          const selected = selectedIds.includes(item.id);
           return (
             <div
               key={item.id}

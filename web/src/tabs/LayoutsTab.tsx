@@ -105,7 +105,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const [summaries, setSummaries] = useState<LayoutSummary[] | null>(null);
   const [devices, setDevices] = useState<DeviceView[] | null>(null);
   const [doc, setDoc] = useState<Doc | null>(restoredDoc);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [saveErrors, setSaveErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -155,7 +155,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
   const open = useCallback((next: Doc) => {
     setDoc(next);
     setOpenCount((n) => n + 1);
-    setSelectedId(null);
+    setSelectedIds([]);
     setSaveErrors([]);
     setNotice(null);
   }, []);
@@ -216,13 +216,21 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     const { items } = addItem(doc.draft, item);
     const { id } = items[items.length - 1];
     setDoc((d) => d && { ...d, draft: addItem(d.draft, { ...item, id }) });
-    setSelectedId(id);
+    setSelectedIds([id]);
   };
 
   // In the image pickers: imported images join the list, where they can be picked.
   const imageImport = <AssetImport kinds={IMAGE_KINDS} reloadAssets={editorData.reloadAssets} onImported={() => undefined} />;
 
-  const selected = doc?.draft.items.find((i) => i.id === selectedId) ?? null;
+  // The selection never names items the draft no longer has (removed, undone by Discard, another layout opened).
+  const draftItems = doc?.draft.items;
+  useEffect(() => {
+    const present = new Set(draftItems?.map((i) => i.id));
+    setSelectedIds((ids) => (ids.every((id) => present.has(id)) ? ids : ids.filter((id) => present.has(id))));
+  }, [draftItems]);
+
+  const selected =
+    selectedIds.length === 1 ? (doc?.draft.items.find((i) => i.id === selectedIds[0]) ?? null) : null;
 
   const dirty = useDirty(doc?.draft ?? null, doc?.saved ?? '', doc?.savedName === null);
 
@@ -319,7 +327,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
     if (!pending || !doc) return;
     clearStash();
     setDoc(doc.savedName === null ? null : { ...doc, draft: JSON.parse(doc.saved) as Layout });
-    setSelectedId(null);
+    setSelectedIds([]);
     setSaveErrors([]);
     setPending(null);
     setNavBlocker(null);
@@ -388,7 +396,7 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
       } else if (dialog.kind === 'delete') {
         if (doc.savedName !== null) await api('DELETE', layoutPath(doc.savedName));
         setDoc(null);
-        setSelectedId(null);
+        setSelectedIds([]);
       } else if (dialog.kind === 'duplicate' && doc.savedName !== null) {
         await api('POST', `${layoutPath(doc.savedName)}/duplicate`, { newName: dialog.name });
       } else if (dialog.kind === 'rename' && dialog.name !== doc.draft.name) {
@@ -521,8 +529,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
             <Canvas
               key={openCount}
               layout={doc.draft}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              selectedIds={selectedIds}
+              onSelect={setSelectedIds}
               onChange={(draft) => setDoc((d) => d && { ...d, draft })}
               onDropSensor={(ref, label, x, y) => insert(sensorItem(ref, label, x, y))}
               itemName={(item) => describeItem(item, catalog)}
@@ -541,10 +549,10 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                 <ItemList
                   items={doc.draft.items}
                   catalog={catalog}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  selectedIds={selectedIds}
+                  onSelect={setSelectedIds}
                   onRemove={(id) => {
-                    if (id === selectedId) setSelectedId(null);
+                    setSelectedIds((ids) => ids.filter((i) => i !== id));
                     setDoc((d) => d && { ...d, draft: removeItem(d.draft, id) });
                   }}
                 />
@@ -572,6 +580,8 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                     imageImport={imageImport}
                     onChange={(patch) => setDoc((d) => d && { ...d, draft: updateItem(d.draft, selected.id, patch) })}
                   />
+                ) : selectedIds.length > 1 ? (
+                  <p className={editorStyles.muted}>{selectedIds.length} items selected</p>
                 ) : (
                   <p className={editorStyles.muted}>Select an item to change it.</p>
                 )}

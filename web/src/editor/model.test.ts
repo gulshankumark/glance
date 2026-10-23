@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ITEM_TYPES, addItem, centered, defaultItem, duplicateItem, moveItem, newLayout, removeItem, sensorItem, toLayoutPoint, updateItem,
+  ITEM_TYPES, addItem, centered, defaultItem, duplicateItem, duplicateItems, moveItem, moveItems, newLayout, removeItem,
+  removeItems, sensorItem, toLayoutPoint, updateItem,
 } from './model';
 import type { Item, Layout } from './model';
 import { LIMITS, fieldsFor } from './schema';
@@ -143,6 +144,62 @@ describe('layout operations', () => {
   it('leaves untouched items shared', () => {
     const l = base();
     expect(moveItem(l, idA(l), 1, 1).items[1]).toBe(l.items[1]);
+  });
+});
+
+describe('group operations', () => {
+  const three = (): Layout => ({
+    ...newLayout('L', 1280, 480),
+    items: [
+      { ...defaultItem('text', 10, 10), id: 'a' },
+      { ...defaultItem('bar', 20, 20), id: 'b' },
+      { ...defaultItem('clock', 30, 30), id: 'c' },
+    ],
+  });
+
+  it('moveItems moves the listed items by their deltas and leaves the rest', () => {
+    const l = three();
+    const m = moveItems(l, { a: { dx: 5, dy: -3 }, c: { dx: 5, dy: -3 }, nope: { dx: 1, dy: 1 } });
+    expect(m.items.map((i) => [i.id, i.x, i.y])).toEqual([['a', 15, 7], ['b', 20, 20], ['c', 35, 27]]);
+    expect(m.items[1]).toBe(l.items[1]);
+  });
+
+  it('moveItems rounds the deltas', () => {
+    expect(moveItems(three(), { a: { dx: 1.6, dy: -0.4 } }).items[0]).toMatchObject({ x: 12, y: 10 });
+  });
+
+  it('moveItems returns the input when nothing changes', () => {
+    const l = three();
+    expect(moveItems(l, {})).toBe(l);
+    expect(moveItems(l, { a: { dx: 0, dy: 0 }, nope: { dx: 3, dy: 3 } })).toBe(l);
+  });
+
+  it('removeItems removes several ids in one call', () => {
+    const r = removeItems(three(), ['a', 'c', 'nope']);
+    expect(r.items.map((i) => i.id)).toEqual(['b']);
+  });
+
+  it('duplicateItems appends offset copies with fresh ids in the original order', () => {
+    const l = three();
+    const { layout, newIds } = duplicateItems(l, ['c', 'a']);
+    expect(layout.items).toHaveLength(5);
+    const copies = layout.items.slice(3);
+    expect(copies.map((i) => i.id)).toEqual(newIds);
+    expect(copies.map((i) => [i.type, i.x, i.y])).toEqual([['text', 26, 26], ['clock', 46, 46]]);
+    expect(new Set(layout.items.map((i) => i.id)).size).toBe(5);
+    expect(newIds).not.toContain('a');
+    expect(duplicateItems(l, ['nope'])).toEqual({ layout: l, newIds: [] });
+  });
+
+  it('never mutates its input', () => {
+    const l = three();
+    const snapshot = structuredClone(l);
+    Object.freeze(l);
+    l.items.forEach((i) => { Object.freeze(i); });
+    moveItems(l, { a: { dx: 1, dy: 1 } });
+    removeItems(l, ['a']);
+    duplicateItems(l, ['a', 'b']);
+    expect(l).toEqual(snapshot);
   });
 });
 
