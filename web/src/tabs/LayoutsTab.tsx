@@ -71,6 +71,18 @@ const dialogTexts: Record<DialogState['kind'], { title: (name: string) => string
   activate: { title: (n) => `Show ${n} on…`, action: 'Make active' },
 };
 
+/** One sentence naming the screens whose active layout is `layout` (deleting it sends them to the status screen). */
+const ScreensShowing: React.FC<{ devices: DeviceView[] | null; layout: string }> = ({ devices, layout }) => {
+  const names = (devices ?? []).filter((d) => d.activeLayout === layout).map((d) => `${d.name} (${d.serial})`);
+  if (names.length === 0) return null;
+  return (
+    <p>
+      {names.join(', ')} {names.length === 1 ? 'shows' : 'show'} this layout and will show the built-in status screen
+      instead.
+    </p>
+  );
+};
+
 /**
  * A page load straight into the Layouts tab follows a confirmed "leave page" prompt (reload, closed tab): its stash
  * is dropped. Loads elsewhere (e.g. the login page after a 401) and in-app navigation keep it.
@@ -619,6 +631,9 @@ export const LayoutsTab: React.FC<{ navigate: (hash: string) => void; route?: st
                   ? 'This new layout has not been saved; it will be discarded.'
                   : 'The layout file is removed. This cannot be undone.'}
               </p>
+            )}
+            {dialog.kind === 'delete' && doc.savedName !== null && (
+              <ScreensShowing devices={devices} layout={doc.savedName} />
             )}
             {dialog.kind === 'activate' && (
               <Field label="Screen">

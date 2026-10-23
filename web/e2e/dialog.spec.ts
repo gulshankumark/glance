@@ -37,6 +37,22 @@ test.describe('Dialog', () => {
     expect(api.calls.some((c) => c.method === 'DELETE')).toBe(false);
   });
 
+  test('deleting the layout a screen shows names that screen', async ({ page }) => {
+    await mockApi(page);
+    await openDefault(page);
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Delete Default?' })).toContainText(
+      'Thermalright 1280x480 LCD (SER1) shows this layout and will show the built-in status screen instead.',
+    );
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+
+    await page.getByRole('button', { name: 'Gaming', exact: true }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Delete Gaming?' });
+    await expect(dialog).toContainText('This cannot be undone.');
+    await expect(dialog).not.toContainText('built-in status screen');
+  });
+
   test('a dialog with a text field focuses the field', async ({ page }) => {
     await mockApi(page);
     await openDefault(page);
