@@ -1,13 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { api, ApiError, getBlob } from '../api/client';
+import { getBlob } from '../api/client';
 import type { DeviceView, LayoutSummary, Rotation } from '../api/types';
-import { formatValue } from '../lib/format';
-import { useDevices } from '../live/LiveProvider';
+import { useDeviceList } from '../devices/useDeviceList';
+import { LayoutSelect, useDeviceUpdate } from '../devices/DeviceControls';
+import { formatNextRetry, formatValue } from '../lib/format';
 import { LiveValue } from '../live/LiveValue';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Field } from '../ui/Field';
-import { Select } from '../ui/Select';
 import styles from './DisplayTab.module.css';
 
 const PREVIEW_INTERVAL_MS = 1000;
@@ -80,16 +79,7 @@ interface DeviceCardProps {
 
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, navigate, onUpdated }) => {
   const rotationLabelId = useId();
-  const [error, setError] = useState<string | null>(null);
-
-  const update = async (patch: { rotation?: Rotation; activeLayout?: string | null }) => {
-    setError(null);
-    try {
-      onUpdated(await api<DeviceView>('PUT', `/api/devices/${encodeURIComponent(device.key)}`, patch));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.errors.join(', ') : 'The change could not be saved.');
-    }
-  };
+  const { update, error } = useDeviceUpdate(device, onUpdated);
 
   return (
     <Card data-testid={`device-card-${device.key}`} title={device.name}>
@@ -109,7 +99,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
       {device.status === 'retrying' && (
         <p className={styles.statusMessage}>
           {device.message ?? 'Connection lost, retrying…'}
-          {device.nextRetry && ` (next try ${new Date(device.nextRetry).toLocaleTimeString()})`}
+          {formatNextRetry(device.nextRetry) && ` (next try ${formatNextRetry(device.nextRetry)})`}
         </p>
       )}
 
@@ -141,16 +131,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
       )}
 
       <div className={styles.controlsRow}>
-        <Field label="Active layout" error={error ?? undefined}>
-          <Select value={device.activeLayout ?? ''} onChange={(e) => update({ activeLayout: e.target.value || null })}>
-            <option value="">None (built-in status screen)</option>
-            {layouts.map((l) => (
-              <option key={l.name} value={l.name} disabled={l.error !== null}>
-                {l.error === null ? `${l.name} (${l.width}×${l.height})` : `${l.name} (cannot be loaded)`}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <LayoutSelect device={device} layouts={layouts} onChange={(activeLayout) => update({ activeLayout })} error={error ?? undefined} />
 
         <div>
           <div id={rotationLabelId} className={styles.groupLabel}>
@@ -178,29 +159,8 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, layouts, previewUrl, na
 };
 
 export const DisplayTab: React.FC<{ navigate: (hash: string) => void }> = ({ navigate }) => {
-  const liveDevices = useDevices();
-  const [devices, setDevices] = useState<DeviceView[] | null>(null);
-  const [layouts, setLayouts] = useState<LayoutSummary[]>([]);
+  const { devices, layouts, onUpdated } = useDeviceList();
   const previews = usePreviews(devices);
-
-  useEffect(() => {
-    api<DeviceView[]>('GET', '/api/devices')
-      .then((list) => setDevices((prev) => prev ?? list))
-      .catch(() => {
-        // a 401 is handled by the client; otherwise the live stream fills the list
-      });
-    api<LayoutSummary[]>('GET', '/api/layouts')
-      .then(setLayouts)
-      .catch(() => {});
-  }, []);
-
-  // The event stream always carries the full current list.
-  useEffect(() => {
-    if (liveDevices) setDevices(liveDevices);
-  }, [liveDevices]);
-
-  const onUpdated = (updated: DeviceView) =>
-    setDevices((list) => list?.map((d) => (d.key === updated.key ? updated : d)) ?? list);
 
   return (
     <div className={styles.container}>
