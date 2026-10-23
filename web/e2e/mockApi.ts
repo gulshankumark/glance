@@ -205,6 +205,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
       'cpu.temperature': 'cpu/t',
       'gpu.temperature': 'gpu/t',
     },
+    pins: {},
     diagnostics: [],
   };
 
@@ -467,6 +468,9 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
         await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown role' }) });
       } else {
         defaultSensors.roles[role] = sensorId || automaticRoles[role] || null;
+        defaultSensors.pins = { ...defaultSensors.pins };
+        if (sensorId) defaultSensors.pins[role] = sensorId;
+        else delete defaultSensors.pins[role];
         await route.fulfill({ status: 204 });
       }
       return;

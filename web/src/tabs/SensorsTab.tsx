@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import type { Sensor, SensorsResponse } from '../api/types';
 import { displayName, roleLabel } from '../editor/catalog';
@@ -20,8 +20,19 @@ const AliasCell: React.FC<{ sensor: Sensor; onSaved: (id: string, alias: string 
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+
+  // After Save or Escape the input is gone: give focus back to the edit button.
+  useEffect(() => {
+    if (draft === null && restoreFocus.current) {
+      restoreFocus.current = false;
+      editButton.current?.focus();
+    }
+  }, [draft]);
 
   const cancel = () => {
+    restoreFocus.current = true;
     setDraft(null);
     setError(null);
   };
@@ -34,6 +45,7 @@ const AliasCell: React.FC<{ sensor: Sensor; onSaved: (id: string, alias: string 
     try {
       await api<void>('PUT', '/api/sensors/alias', { id: sensor.id, alias });
       onSaved(sensor.id, alias);
+      restoreFocus.current = true;
       setDraft(null);
     } catch (e) {
       setError(errorText(e));
@@ -45,9 +57,10 @@ const AliasCell: React.FC<{ sensor: Sensor; onSaved: (id: string, alias: string 
   if (draft === null) {
     return (
       <button
+        ref={editButton}
         type="button"
         className={styles.editBtn}
-        aria-label={`Edit alias of ${sensor.name}`}
+        aria-label={`${sensor.alias ?? 'Add alias'} — edit alias of ${sensor.name}`}
         onClick={() => setDraft(sensor.alias ?? '')}
       >
         {sensor.alias ?? <span className={styles.placeholder}>Add alias</span>}
@@ -95,8 +108,6 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
   const [data, setData] = useState<SensorsResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  // The API only reports what a role resolves to, not whether it is pinned: remember this session's pins.
-  const [pins, setPins] = useState<Record<string, string>>({});
   const [roleErrors, setRoleErrors] = useState<Record<string, string>>({});
   const values = useSensorValues();
 
@@ -125,7 +136,6 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
     setRoleErrors((r) => ({ ...r, [role]: '' }));
     try {
       await api<void>('PUT', `/api/roles/${encodeURIComponent(role)}`, { sensorId: sensorId || null });
-      setPins((p) => ({ ...p, [role]: sensorId }));
       await load();
     } catch (e) {
       setRoleErrors((r) => ({ ...r, [role]: errorText(e) }));
@@ -171,7 +181,7 @@ export const SensorsTab: React.FC<{ navigate: (hash: string) => void }> = () => 
             return (
               <div key={role}>
                 <Field label={roleLabel(role)} error={roleErrors[role] || undefined}>
-                  <Select value={pins[role] ?? ''} onChange={(e) => void pinRole(role, e.target.value)}>
+                  <Select value={data.pins?.[role] ?? ''} onChange={(e) => void pinRole(role, e.target.value)}>
                     <option value="">Automatic</option>
                     {data.sensors.map((s) => (
                       <option key={s.id} value={s.id}>
