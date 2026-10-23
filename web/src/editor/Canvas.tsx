@@ -331,16 +331,8 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
     <div>
       <p id={hintId} data-testid="canvas-shortcuts" className={styles.shortcuts}>
         Click or tap an item to select it, drag to move (it snaps to other items and the canvas; hold Alt to place freely). Shift+click (Shift+Space in the Items list) adds to the selection. Keys: Arrows move 1 px,
-        Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears. With two or more selected, the Align buttons above line them up by what is drawn.
+        Shift+Arrows 10 px, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Escape clears. With two or more selected, the Align buttons below line them up by what is drawn.
       </p>
-      {/* Hidden rather than removed below two items, so selecting does not shift the canvas under the pointer. */}
-      <div style={{ visibility: selection.length >= 2 ? 'visible' : 'hidden' }}>
-        <AlignBar
-          count={selection.length}
-          onAlign={(mode) => arrange((r) => alignMoves(r, mode))}
-          onDistribute={(axis) => arrange((r) => distributeMoves(r, axis))}
-        />
-      </div>
       <div
         ref={stageRef}
         data-testid="layout-canvas"
@@ -421,6 +413,14 @@ export const Canvas: React.FC<CanvasProps> = ({ layout, selectedIds, onSelect, o
           );
         })}
       </div>
+      {/* Below the canvas, so its appearing never shifts the canvas under the pointer. */}
+      {selection.length >= 2 && (
+        <AlignBar
+          count={selection.length}
+          onAlign={(mode) => arrange((r) => alignMoves(r, mode))}
+          onDistribute={(axis) => arrange((r) => distributeMoves(r, axis))}
+        />
+      )}
       {error && (
         <p role="status" style={{ marginTop: 'var(--space-2)', fontSize: '0.85rem', color: 'var(--warning)' }}>
           Preview not updated: {error}

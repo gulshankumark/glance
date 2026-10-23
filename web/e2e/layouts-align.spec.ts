@@ -6,6 +6,8 @@ import type { Item, Layout } from '../src/api/types';
 const canvas = (page: Page) => page.getByTestId('layout-canvas');
 const onCanvas = (page: Page, name: RegExp) => canvas(page).getByRole('button', { name });
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Align' });
+/** The toolbar element whether or not it is visible (getByRole skips hidden ones). */
+const barInDom = (page: Page) => page.locator('[role="toolbar"][aria-label="Align"]');
 const button = (page: Page, name: string) => toolbar(page).getByRole('button', { name, exact: true });
 const TITLE = /^Text — Glance/;
 const CPU = /^Sensor —/;
@@ -63,9 +65,9 @@ test.describe('Layouts: align and distribute', () => {
     const api = await mockApi(page);
     await inkBounds(page);
     await openDefault(page);
-    await expect(toolbar(page)).toBeHidden();
+    await expect(barInDom(page)).toHaveCount(0);
     await onCanvas(page, TITLE).click();
-    await expect(toolbar(page)).toBeHidden();
+    await expect(barInDom(page)).toHaveCount(0);
 
     await selectAll3(page);
     await button(page, 'Align left').click();
@@ -91,7 +93,7 @@ test.describe('Layouts: align and distribute', () => {
     expect(rows[2].y).toBe(300);
   });
 
-  test('with two selected the distribute buttons are disabled; the toolbar is keyboard reachable', async ({ page }) => {
+  test('with two selected the distribute buttons are disabled', async ({ page }) => {
     await mockApi(page);
     await inkBounds(page);
     await openDefault(page);
@@ -104,12 +106,77 @@ test.describe('Layouts: align and distribute', () => {
     }
     await expect(button(page, 'Distribute horizontally')).toBeDisabled();
     await expect(button(page, 'Distribute vertically')).toBeDisabled();
+  });
 
-    // Tab order: the toolbar sits right before the canvas.
+  test('the toolbar is one Tab stop after the canvas; arrows, Home and End rove, skipping disabled buttons', async ({ page }) => {
+    const api = await mockApi(page);
+    await inkBounds(page);
+    await openDefault(page);
+
+    await onCanvas(page, TITLE).click();
+    await onCanvas(page, CPU).click({ modifiers: ['Shift'] });
     await canvas(page).focus();
-    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(button(page, 'Align left')).toBeFocused();
+    await expect(toolbar(page).locator('[tabindex="0"]')).toHaveCount(1);
+    await page.keyboard.press('ArrowRight');
+    await expect(button(page, 'Align centre')).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(button(page, 'Align bottom')).toBeFocused(); // both distribute buttons are disabled
+    await page.keyboard.press('ArrowRight');
+    await expect(button(page, 'Align left')).toBeFocused(); // wraps
+    await page.keyboard.press('ArrowLeft');
     await expect(button(page, 'Align bottom')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(button(page, 'Align left')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    // Leaving and coming back returns to the last focused button.
+    await page.keyboard.press('Shift+Tab');
+    await expect(canvas(page)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(button(page, 'Align centre')).toBeFocused();
+    await page.keyboard.press('Home');
     await page.keyboard.press('Enter');
-    await expect(canvas(page).getByRole('button', { pressed: true })).toHaveCount(2);
+
+    const items = await saved(page, api);
+    const lefts = items.filter((i) => i.id !== 'bar1').map((i) => drawn(i).x);
+    expect(lefts).toEqual([43, 43]); // the CPU ink (47) moved onto the title's ink edge
+    expect(items.find((i) => i.id === 'bar1')!.x).toBe(600);
+  });
+
+  test('with three selected, End reaches Distribute vertically and Enter spaces the rows evenly', async ({ page }) => {
+    const api = await mockApi(page);
+    await inkBounds(page);
+    await openDefault(page);
+
+    await selectAll3(page);
+    await canvas(page).focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('ArrowLeft');
+    await expect(button(page, 'Distribute vertically')).toBeFocused(); // wraps backwards
+    await page.keyboard.press('Home');
+    await page.keyboard.press('End');
+    await expect(button(page, 'Distribute vertically')).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    const rows = (await saved(page, api)).map(drawn).sort((a, b) => a.y - b.y);
+    const gaps = rows.slice(1).map((r, i) => r.y - (rows[i].y + rows[i].height));
+    expect(gaps).toEqual([96, 96]);
+  });
+
+  test('the canvas does not move when the bar appears; at 360 px no bar is mounted with 0 or 1 selected', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await mockApi(page);
+    await inkBounds(page);
+    await openDefault(page);
+
+    await expect(barInDom(page)).toHaveCount(0);
+    await onCanvas(page, TITLE).click();
+    await expect(barInDom(page)).toHaveCount(0);
+    const before = (await canvas(page).boundingBox())!.y;
+    await onCanvas(page, CPU).click({ modifiers: ['Shift'] });
+    await expect(toolbar(page)).toBeVisible();
+    expect((await canvas(page).boundingBox())!.y).toBe(before);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
   });
 });
