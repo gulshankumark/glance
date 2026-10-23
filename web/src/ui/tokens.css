@@ -77,3 +77,8 @@ button, input, select, textarea {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* The tab bar scrolls sideways on phones, so it clips anything drawn outside it: draw its ring inside. */
+nav a:focus-visible {
+  outline-offset: -2px;
+}

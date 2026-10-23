@@ -132,4 +132,24 @@ test.describe('Accessibility', () => {
     await openTab(page, 'Sensors');
     await expectRing(page.getByRole('searchbox', { name: 'Search sensors' }), 'search box');
   });
+
+  test('tab bar focus ring is not clipped by the scrolling nav', async ({ page }) => {
+    await mockApi(page);
+    await page.goto('/#display');
+    const nav = page.getByRole('navigation');
+    for (const tab of TABS) {
+      const link = nav.getByRole('link', { name: tab });
+      await tabTo(page, link);
+      // The ring spans the link box grown by outline width + offset; all of it must lie inside the nav,
+      // which clips its overflow so it can scroll sideways on phones.
+      const r = await link.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const grow = parseFloat(s.outlineWidth) + parseFloat(s.outlineOffset);
+        const a = el.getBoundingClientRect();
+        const n = el.parentElement!.getBoundingClientRect();
+        return { top: a.top - grow - n.top, left: a.left - grow - n.left, bottom: n.bottom - (a.bottom + grow), right: n.right - (a.right + grow) };
+      });
+      expect(Math.min(r.top, r.left, r.bottom, r.right), `${tab} ring inside nav`).toBeGreaterThanOrEqual(0);
+    }
+  });
 });
