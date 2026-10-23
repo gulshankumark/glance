@@ -285,6 +285,40 @@ test.describe('Layouts editing: properties and items', () => {
     await expect(props(page).getByLabel('Threshold 2 from')).toHaveValue('0');
   });
 
+  test('temperature gauge limits and thresholds use the chosen unit and are stored in °C', async ({ page }) => {
+    const api = await mockApi(page, { settings: { unit: 'fahrenheit' } });
+    await openLayout(page, 'Default');
+    await page.getByTestId('item-box-bar1').click();
+
+    const max = props(page).getByLabel('Maximum (°F)');
+    await max.fill('212');
+    await max.press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.max).toBe(100);
+
+    await props(page).getByRole('button', { name: '+ Add threshold' }).click();
+    await expect(props(page).getByRole('group', { name: 'Thresholds (°F)' })).toBeVisible();
+    await expect(props(page).getByLabel('Threshold 1 from')).toHaveValue('32');
+    await props(page).getByLabel('Threshold 1 from').fill('100');
+    await props(page).getByLabel('Threshold 1 from').press('Enter');
+    await expect.poll(() => itemOf(api, 'bar1')?.thresholds).toEqual([{ from: 37.78, color: '#FF4444' }]);
+    await expect(props(page).getByLabel('Threshold 1 from')).toHaveValue('100');
+
+    // Leaving a field untouched writes nothing back (no °C → °F → °C drift).
+    await max.focus();
+    await page.keyboard.press('Tab');
+    await props(page).getByLabel('Threshold 1 from').focus();
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(400);
+    expect(itemOf(api, 'bar1')?.max).toBe(100);
+    expect(itemOf(api, 'bar1')?.thresholds).toEqual([{ from: 37.78, color: '#FF4444' }]);
+
+    // A unit change while editing shows the same stored values in the new unit.
+    api.settings.unit = 'celsius';
+    await api.sendEvent('devices', api.devices);
+    await expect(props(page).getByLabel('Maximum (°C)')).toHaveValue('100');
+    await expect(props(page).getByLabel('Threshold 1 from')).toHaveValue('37.78');
+  });
+
   test('items list selects and deletes from the keyboard', async ({ page }) => {
     const api = await mockApi(page);
     await openLayout(page, 'Default');

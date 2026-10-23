@@ -1,4 +1,5 @@
-import type { Threshold } from '../api/types';
+import type { SensorsResponse, Settings, Threshold } from '../api/types';
+import { ROLE_PREFIX } from './catalog';
 import type { Field } from './schema';
 
 /**
@@ -33,3 +34,26 @@ export const addThreshold = (list: Threshold[]): Threshold[] => [
   ...list,
   { from: list.length ? list[list.length - 1].from + 10 : 0, color: '#FF4444' },
 ];
+
+/**
+ * Gauge minimum/maximum/thresholds are absolute temperatures stored in °C (canonical) when the gauge shows a
+ * temperature. Shown in the chosen unit: °F rounded to 0.1, so a stored value never shows float noise.
+ */
+export const toShownTemperature = (celsius: number, unit: Settings['unit']): number =>
+  unit === 'fahrenheit' ? Math.round((celsius * 9) / 5 * 10 + 320) / 10 + 0 : celsius; // + 0: never -0
+
+/** A value typed in the chosen unit, as stored (°C rounded to 0.01: it shows again exactly as typed, to 0.1 °F). */
+export const fromShownTemperature = (shown: number, unit: Settings['unit']): number =>
+  unit === 'fahrenheit' ? Math.round(((shown - 32) * 5) / 9 * 100) / 100 + 0 : shown;
+
+/** True when the binding (a sensor id or "role:…") is a temperature; an unresolved role goes by its name. */
+export function isTemperatureRef(ref: string, catalog: SensorsResponse | null): boolean {
+  if (!catalog) return false;
+  let id: string | null = ref;
+  if (ref.startsWith(ROLE_PREFIX)) {
+    const role = ref.slice(ROLE_PREFIX.length);
+    id = catalog.roles[role] ?? null;
+    if (id === null) return role.endsWith('.temperature');
+  }
+  return catalog.sensors.find((s) => s.id === id)?.kind === 'temperature';
+}

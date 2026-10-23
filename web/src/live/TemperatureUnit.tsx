@@ -41,6 +41,8 @@ export const TemperatureUnitProvider: React.FC<{ children: React.ReactNode }> = 
   return <UnitContext.Provider value={{ unit, setUnit }}>{children}</UnitContext.Provider>;
 };
 
+export const useTemperatureUnit = () => useContext(UnitContext).unit;
+
 export const useSetTemperatureUnit = () => useContext(UnitContext).setUnit;
 
 /** Formats a sensor value in the chosen temperature unit (see formatSensorValue). */

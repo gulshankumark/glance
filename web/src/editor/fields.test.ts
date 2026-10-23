@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SensorsResponse } from '../api/types';
 import { describeItem } from './catalog';
-import { addThreshold, isColor, parseNumber, withRgb } from './fields';
+import { addThreshold, fromShownTemperature, isColor, isTemperatureRef, parseNumber, toShownTemperature, withRgb } from './fields';
 import { defaultItem } from './model';
 import { fieldsFor, LIMITS } from './schema';
 
@@ -70,5 +70,45 @@ describe('describeItem', () => {
     expect(describeItem(defaultItem('text', 0, 0, { text: '' }), catalog)).toBe('Text — (empty)');
     expect(describeItem(defaultItem('clock', 0, 0), catalog)).toBe('Clock — Local time');
     expect(describeItem(defaultItem('image', 0, 0, { assetId: 'x', width: 30, height: 20 }), catalog)).toBe('Image — 30×20');
+  });
+});
+
+describe('temperature fields', () => {
+  it('shows °C values as they are and °F values rounded to 0.1', () => {
+    expect(toShownTemperature(37.78, 'celsius')).toBe(37.78);
+    expect(toShownTemperature(50, 'fahrenheit')).toBe(122);
+    expect(toShownTemperature(37.78, 'fahrenheit')).toBe(100);
+    expect(toShownTemperature(-40, 'fahrenheit')).toBe(-40);
+  });
+
+  it('stores what was typed in °C, rounded to 0.01', () => {
+    expect(fromShownTemperature(80, 'celsius')).toBe(80);
+    expect(fromShownTemperature(122, 'fahrenheit')).toBe(50);
+    expect(fromShownTemperature(100, 'fahrenheit')).toBe(37.78);
+  });
+
+  it('a typed °F value shows again as typed', () => {
+    for (const f of [100, 150.5, 0, -3.2, 212, 99.9]) {
+      expect(toShownTemperature(fromShownTemperature(f, 'fahrenheit'), 'fahrenheit')).toBe(f);
+    }
+  });
+
+  it('knows which bindings are temperatures, roles included', () => {
+    const catalog: SensorsResponse = {
+      sensors: [
+        { id: 'cpu/t', hardware: 'h', hardwareKind: 'cpu', name: 'n', kind: 'temperature', unit: '°C', value: 1, alias: null },
+        { id: 'cpu/l', hardware: 'h', hardwareKind: 'cpu', name: 'n', kind: 'load', unit: '%', value: 1, alias: null },
+      ],
+      roles: { 'cpu.temperature': 'cpu/t', 'cpu.load': 'cpu/l', 'gpu.temperature': null },
+      pins: {},
+      diagnostics: [],
+    };
+    expect(isTemperatureRef('cpu/t', catalog)).toBe(true);
+    expect(isTemperatureRef('role:cpu.temperature', catalog)).toBe(true);
+    expect(isTemperatureRef('cpu/l', catalog)).toBe(false);
+    expect(isTemperatureRef('role:cpu.load', catalog)).toBe(false);
+    expect(isTemperatureRef('role:gpu.temperature', catalog)).toBe(true);
+    expect(isTemperatureRef('unknown', catalog)).toBe(false);
+    expect(isTemperatureRef('cpu/t', null)).toBe(false);
   });
 });

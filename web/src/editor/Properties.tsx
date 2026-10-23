@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
-import type { FontSpec, Item, Threshold } from '../api/types';
+import type { FontSpec, Item, Settings, Threshold } from '../api/types';
+import { useTemperatureUnit } from '../live/TemperatureUnit';
 import { Button } from '../ui/Button';
 import { Field as FieldBox } from '../ui/Field';
 import { Select } from '../ui/Select';
 import { AssetThumb, IMAGE_KINDS } from './assets';
 import { describeItem, matches, sensorOptions } from './catalog';
-import { addThreshold } from './fields';
+import { addThreshold, fromShownTemperature, isTemperatureRef, toShownTemperature } from './fields';
 import { ColorInput, NumberInput, type Aria } from './inputs';
 import { AssetPicker } from './pickers';
 import { fieldsFor, LIMITS, type Field } from './schema';
@@ -40,6 +41,8 @@ const SensorSelect: React.FC<Aria & { value: string; data: EditorData; onCommit:
     </span>
   );
 };
+
+const UNIT_LABEL: Record<Settings['unit'], string> = { celsius: '°C', fahrenheit: '°F' };
 
 const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const fontSizeField: Field = { key: 'size', label: 'Font size', kind: 'number', ...LIMITS.fontSize, step: 1 };
@@ -83,7 +86,10 @@ const FontEditor: React.FC<{ value: FontSpec; fonts: string[] | null; onCommit: 
  * Threshold rows keyed by a stable id that follows each row when the list is re-sorted (kept ascending by `from`),
  * so an input that is still focused after Enter keeps editing the same row.
  */
-const ThresholdsEditor: React.FC<{ value: Threshold[]; onCommit: (v: Threshold[]) => void }> = ({ value, onCommit }) => {
+/** `unit` is set when the gauge shows a temperature: `from` is then shown and typed in it, and stored in °C. */
+const ThresholdsEditor: React.FC<{ value: Threshold[]; unit: Settings['unit'] | null; onCommit: (v: Threshold[]) => void }> = ({
+  value, unit, onCommit,
+}) => {
   const nextKey = useRef(0);
   const keys = useRef<number[]>([]);
   if (keys.current.length !== value.length) keys.current = value.map(() => nextKey.current++);
@@ -97,15 +103,15 @@ const ThresholdsEditor: React.FC<{ value: Threshold[]; onCommit: (v: Threshold[]
     commit(rows().map((r, j) => (j === i ? { ...r, t: { ...r.t, ...patch } } : r)));
   return (
     <fieldset className={styles.fieldset}>
-      <legend>Thresholds</legend>
+      <legend>{unit ? `Thresholds (${UNIT_LABEL[unit]})` : 'Thresholds'}</legend>
       {value.length === 0 && <p className={styles.hint}>None: the gauge uses its colour throughout.</p>}
       {value.map((t, i) => (
         <div key={keys.current[i]} className={styles.thresholdRow}>
           <NumberInput
             aria-label={`Threshold ${i + 1} from`}
             field={thresholdFromField}
-            value={t.from}
-            onCommit={(v) => v !== null && set(i, { from: v })}
+            value={unit ? toShownTemperature(t.from, unit) : t.from}
+            onCommit={(v) => v !== null && set(i, { from: unit ? fromShownTemperature(v, unit) : v })}
           />
           <ColorInput
             aria-label={`Threshold ${i + 1} colour`}
@@ -181,6 +187,10 @@ export interface PropertiesProps {
 export const Properties: React.FC<PropertiesProps> = ({ item, data, onChange, imageImport }) => {
   const rec = item as unknown as Record<string, unknown>;
   const set = (key: string, v: unknown) => onChange({ [key]: v } as Partial<Item>);
+  // A gauge bound to a temperature: its minimum, maximum and thresholds are absolute temperatures (stored in °C).
+  const chosenUnit = useTemperatureUnit();
+  const unit = typeof rec.sensor === 'string' && isTemperatureRef(rec.sensor, data.catalog) ? chosenUnit : null;
+  const isLimit = (f: Field) => unit !== null && f.kind === 'number' && (f.key === 'min' || f.key === 'max');
 
   const control = (f: Field): React.ReactNode => {
     const v = rec[f.key];
@@ -197,6 +207,18 @@ export const Properties: React.FC<PropertiesProps> = ({ item, data, onChange, im
           </FieldBox>
         );
       case 'number':
+        if (isLimit(f) && unit) {
+          const stored = v as number | null | undefined;
+          return (
+            <FieldBox key={f.key} label={`${f.label} (${UNIT_LABEL[unit]})`}>
+              <NumberInput
+                field={f}
+                value={stored === null || stored === undefined ? stored : toShownTemperature(stored, unit)}
+                onCommit={(n) => set(f.key, n === null ? null : fromShownTemperature(n, unit))}
+              />
+            </FieldBox>
+          );
+        }
         return (
           <FieldBox key={f.key} label={f.label}>
             <NumberInput field={f} value={v as number | null | undefined} onCommit={(n) => set(f.key, n)} />
@@ -244,7 +266,7 @@ export const Properties: React.FC<PropertiesProps> = ({ item, data, onChange, im
       case 'font':
         return <FontEditor key={f.key} value={v as FontSpec} fonts={data.fonts} onCommit={(font) => set(f.key, font)} />;
       case 'thresholds':
-        return <ThresholdsEditor key={f.key} value={(v as Threshold[]) ?? []} onCommit={(t) => set(f.key, t)} />;
+        return <ThresholdsEditor key={f.key} value={(v as Threshold[]) ?? []} unit={unit} onCommit={(t) => set(f.key, t)} />;
       case 'asset':
         return (
           <AssetField key={f.key} value={String(v)} data={data} imageImport={imageImport} onCommit={(a) => set(f.key, a)} />
