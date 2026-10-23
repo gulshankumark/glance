@@ -83,7 +83,8 @@ test.describe('Display Tab', () => {
     await expect
       .poll(async () => {
         await page.clock.runFor(250);
-        return previewLoaded(page);
+        // Only once the <img> exists: previewLoaded would otherwise wait for it while the paused clock holds it back.
+        return (await preview(page).count()) > 0 && previewLoaded(page);
       })
       .toBe(true);
     // Line up with the refresh schedule: advance until the next refresh is made.
