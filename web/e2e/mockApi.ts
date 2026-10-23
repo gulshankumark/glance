@@ -21,6 +21,8 @@ export interface MockApiOptions {
   previewStatus?: 200 | 404;
   /** GET /api/sensors answer (default: three sensors and two roles, see defaultSensors). */
   sensors?: SensorsResponse;
+  /** While set, PUT /api/sensors/alias and PUT /api/roles/{role} answer 400 {error}; may be changed while a test runs. */
+  sensorWriteError?: string;
   /** Stored assets (default: seedAssets()). */
   assets?: Asset[];
   /** While set, POST /api/assets answers this status with {error}; may be changed while a test runs. */
@@ -205,6 +207,9 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
     },
     diagnostics: [],
   };
+
+  // Pins made through PUT /api/roles/{role}; an unpinned role resolves to its initial (automatic) sensor.
+  const automaticRoles = { ...defaultSensors.roles };
 
   // A mock EventSource behaving like the real one: fires open (or error, with eventsFail) shortly after construction.
   // window.__eventSourceCount counts connection attempts; the latest instance is window.__mockEventSource.
@@ -435,6 +440,35 @@ export async function mockApi(page: Page, options: MockApiOptions = {}): Promise
 
     if (path === '/api/render/bounds' && method === 'POST') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockBounds(body as Layout)) });
+      return;
+    }
+
+    if (path === '/api/sensors/alias' && method === 'PUT') {
+      const { id, alias } = body as { id: string; alias?: string | null };
+      const sensor = defaultSensors.sensors.find((x) => x.id === id);
+      if (opts.sensorWriteError) {
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: opts.sensorWriteError }) });
+      } else if (!sensor) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown sensor' }) });
+      } else {
+        sensor.alias = alias?.trim() || null;
+        await route.fulfill({ status: 204 });
+      }
+      return;
+    }
+
+    const rolePath = /^\/api\/roles\/(.+)$/.exec(path);
+    if (rolePath && method === 'PUT') {
+      const role = decodeURIComponent(rolePath[1]);
+      const { sensorId } = body as { sensorId: string | null };
+      if (opts.sensorWriteError) {
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: opts.sensorWriteError }) });
+      } else if (!(role in defaultSensors.roles)) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unknown role' }) });
+      } else {
+        defaultSensors.roles[role] = sensorId || automaticRoles[role] || null;
+        await route.fulfill({ status: 204 });
+      }
       return;
     }
 
