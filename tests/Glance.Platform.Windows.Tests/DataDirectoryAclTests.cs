@@ -224,29 +224,92 @@ public class DataDirectoryAclTests
         Assert.True(sub.Exists);
     }
 
+    private sealed class RecordingSteps : DataDirectoryAcl.IWalkSteps
+    {
+        public List<string> Calls { get; } = new();
+
+        public void Secure(FileSystemInfo entry, string rel, DataDirectoryAcl.EntryKind kind, bool resetAll, List<string> actions, ref bool changed) =>
+            Calls.Add($"secure {kind} {rel}");
+
+        public bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed)
+        {
+            Calls.Add($"links {rel}");
+            return DataDirectoryAcl.RemoveIfLink(entry, rel, actions, ref changed);
+        }
+    }
+
     [Fact]
-    public void Link_pass_removes_nested_links_and_keeps_everything_else()
+    public void Walk_locks_each_directory_then_removes_its_links_then_handles_children()
     {
         using var dir = new TempDir();
         var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
         var outside = Directory.CreateDirectory(Path.Combine(dir.Path, "outside")).FullName;
         var outsideFile = Path.Combine(outside, "a.txt");
         File.WriteAllText(outsideFile, "keep");
+        File.WriteAllText(Path.Combine(root, "a.json"), "{}");
         Directory.CreateDirectory(Path.Combine(root, "layouts", "deep"));
-        File.WriteAllText(Path.Combine(root, "layouts", "a.json"), "{}");
+        File.WriteAllText(Path.Combine(root, "layouts", "c.json"), "{}");
         LinkFixtures.HardLink(Path.Combine(root, "layouts", "deep", "b.json"), outsideFile);
         LinkFixtures.Junction(Path.Combine(root, "logs"), outside);
+        var steps = new RecordingSteps();
         var actions = new List<string>();
         var changed = false;
 
-        DataDirectoryAcl.RemoveLinks(new DirectoryInfo(root), "", actions, ref changed);
+        DataDirectoryAcl.Walk(new DirectoryInfo(root), "", isRoot: true, resetAll: true, actions, ref changed, steps);
 
+        var layouts = "layouts";
+        var deep = Path.Combine("layouts", "deep");
+        Assert.Equal(new[]
+        {
+            "secure Root .",                                            // 1. lock the directory
+            "links a.json", "links layouts", "links logs",              // 2. links among its entries
+            "secure File a.json",                                       // 3. remaining files
+            $"secure Directory {layouts}",                              // 4. recurse: same order inside
+            $"links {Path.Combine(layouts, "c.json")}", $"links {deep}",
+            $"secure File {Path.Combine(layouts, "c.json")}",
+            $"secure Directory {deep}",
+            $"links {Path.Combine(deep, "b.json")}",
+        }, steps.Calls);
         Assert.True(changed);
-        Assert.Equal(new[] { Path.Combine("layouts", "deep", "b.json") + ": hard link deleted", "logs: link deleted" }, actions.Order());
+        Assert.Equal(new[] { Path.Combine(deep, "b.json") + ": hard link deleted", "logs: link deleted" }, actions.Order());
         Assert.False(File.Exists(Path.Combine(root, "layouts", "deep", "b.json")));
         Assert.False(Directory.Exists(Path.Combine(root, "logs")));
-        Assert.True(File.Exists(Path.Combine(root, "layouts", "a.json")));
+        Assert.True(File.Exists(Path.Combine(root, "a.json")));
         Assert.Equal("keep", File.ReadAllText(outsideFile));
+    }
+
+    [Fact]
+    public void Descriptor_written_by_handle_changes_only_that_directory()
+    {
+        using var dir = new TempDir();
+        var target = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var child = Path.Combine(target, "settings.json");   // a by-name write would push the new entries into this
+        File.WriteAllText(child, "{}");
+        var childBefore = LinkFixtures.RawSddl(child);
+        var me = WindowsIdentity.GetCurrent().User!;   // unelevated: we may only make ourselves the owner
+
+        using (var h = FileLinks.OpenSecurity(target))
+            h.WriteDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, me));
+
+        var sddl = LinkFixtures.Sddl(target);
+        Assert.StartsWith($"O:{me.Value}", sddl);
+        Assert.Contains("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", sddl);   // protected, inheritable, SYSTEM + Administrators only
+        Assert.Equal(childBefore, LinkFixtures.RawSddl(child));   // the stored descriptor: nothing propagated
+
+        // Clean up: as owner we may still rewrite the DACL.
+        var restore = new DirectorySecurity();
+        restore.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(target).SetAccessControl(restore);
+    }
+
+    [Fact]
+    public void Descriptors_below_the_root_carry_exactly_what_the_root_passes_down()
+    {
+        var dirSd = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Directory, AdminsSid), 0);
+        var fileSd = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.File, AdminsSid), 0);
+        Assert.Equal("O:BAD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)", dirSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
+        Assert.Equal("O:BAD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)", fileSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
     }
 
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
@@ -266,6 +329,32 @@ public class DataDirectoryAclTests
         Assert.Contains("settings.json: hard link deleted", result.Actions);
         Assert.False(File.Exists(Path.Combine(root, "settings.json")));
         Assert.Equal(before, LinkFixtures.Sddl(outside));
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Hard_link_in_user_writable_subdirectory_is_deleted_and_target_acl_unchanged()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var sub = Directory.CreateDirectory(Path.Combine(root, "layouts"));
+        var sec = sub.GetAccessControl();
+        sec.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        sub.SetAccessControl(sec);
+        var outside = Path.Combine(dir.Path, "outside.txt");   // stands in for a file elsewhere on the machine
+        File.WriteAllText(outside, "keep");
+        var before = LinkFixtures.Sddl(outside);
+        LinkFixtures.HardLink(Path.Combine(sub.FullName, "a.json"), outside);
+
+        var result = DataDirectoryAcl.Enforce(root);
+
+        Assert.Contains(Path.Combine("layouts", "a.json") + ": hard link deleted", result.Actions);
+        Assert.False(File.Exists(Path.Combine(sub.FullName, "a.json")));
+        Assert.Equal("keep", File.ReadAllText(outside));
+        Assert.Equal(before, LinkFixtures.Sddl(outside));
+        Assert.Empty(new DirectoryInfo(sub.FullName).GetAccessControl()
+            .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier)));
     }
 
     [Fact]

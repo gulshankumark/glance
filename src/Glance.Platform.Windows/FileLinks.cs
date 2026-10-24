@@ -55,6 +55,44 @@ internal static partial class FileLinks
         return info;
     }
 
+    /// <summary>
+    /// Opens the entry itself (never what it points to) to read and write its own security descriptor. The descriptor
+    /// is written with SetKernelObjectSecurity, which changes this one object only: nothing is propagated to children,
+    /// unlike SetNamedSecurityInfo/SetSecurityInfo, which push inherited entries into everything below.
+    /// </summary>
+    public static SecuredEntry OpenSecurity(string path)
+    {
+        // Without READ_CONTROL when a planted DACL refuses it even to backup semantics: the descriptor is then unreadable.
+        var h = Open(path, ReadControl | WriteDac | WriteOwner | FileReadAttributes)
+            ?? Open(path, WriteDac | WriteOwner | FileReadAttributes)
+            ?? throw LastError(path);
+        try { return new SecuredEntry(h, path, Query(h, path)); }
+        catch { h.Dispose(); throw; }
+    }
+
+    /// <summary>An entry opened by <see cref="OpenSecurity"/>; <see cref="Info"/> was read through the same handle.</summary>
+    public sealed class SecuredEntry(SafeFileHandle handle, string path, Info info) : IDisposable
+    {
+        public Info Info { get; } = info;
+
+        /// <summary>Owner and DACL in self-relative form, or null when they cannot be read.</summary>
+        public byte[]? ReadDescriptor()
+        {
+            GetKernelObjectSecurity(handle, OwnerSecurityInformation | DaclSecurityInformation, null, 0, out var needed);
+            if (needed == 0) return null;
+            var sd = new byte[needed];
+            return GetKernelObjectSecurity(handle, OwnerSecurityInformation | DaclSecurityInformation, sd, needed, out _) ? sd : null;
+        }
+
+        /// <summary>Sets owner and DACL (protection comes from the descriptor's control flags) on this object only.</summary>
+        public void WriteDescriptor(byte[] selfRelative)
+        {
+            if (!SetKernelObjectSecurity(handle, OwnerSecurityInformation | DaclSecurityInformation, selfRelative)) throw LastError(path);
+        }
+
+        public void Dispose() => handle.Dispose();
+    }
+
     private static Info Query(SafeFileHandle h, string path)
     {
         if (!GetFileInformationByHandle(h, out var byHandle)) throw LastError(path);
@@ -95,7 +133,8 @@ internal static partial class FileLinks
         _ => new IOException($"'{path}': {Marshal.GetPInvokeErrorMessage(error)}", unchecked((int)(0x80070000u | (uint)error))),
     };
 
-    private const uint FileReadAttributes = 0x80, Delete = 0x10000;
+    private const uint FileReadAttributes = 0x80, Delete = 0x10000, ReadControl = 0x20000, WriteDac = 0x40000, WriteOwner = 0x80000;
+    private const uint OwnerSecurityInformation = 0x1, DaclSecurityInformation = 0x4;
     private const uint FileShareAll = 0x1 | 0x2 | 0x4, OpenExisting = 3;
     private const uint FlagOpenReparsePoint = 0x00200000, FlagBackupSemantics = 0x02000000;
     private const uint FileAttributeReparsePoint = 0x400;
@@ -143,4 +182,12 @@ internal static partial class FileLinks
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref FileDispositionInfo info, uint size);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetKernelObjectSecurity(SafeFileHandle h, uint info, [Out] byte[]? sd, uint length, out uint needed);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetKernelObjectSecurity(SafeFileHandle h, uint info, byte[] sd);
 }

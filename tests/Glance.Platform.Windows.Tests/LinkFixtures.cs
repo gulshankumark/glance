@@ -26,6 +26,17 @@ internal static class LinkFixtures
         ? new DirectoryInfo(path).GetAccessControl().GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.All)
         : new FileInfo(path).GetAccessControl().GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.All);
 
+    /// <summary>
+    /// The descriptor exactly as stored, read through a handle. Reading by name (GetNamedSecurityInfo) re-derives the
+    /// inherited flags from the parent, so it can report a change the object itself never had.
+    /// </summary>
+    public static string RawSddl(string path)
+    {
+        using var h = FileLinks.OpenSecurity(path);
+        return new System.Security.AccessControl.RawSecurityDescriptor(h.ReadDescriptor()!, 0)
+            .GetSddlForm(System.Security.AccessControl.AccessControlSections.Owner | System.Security.AccessControl.AccessControlSections.Access);
+    }
+
     private static void Mklink(string kind, string link, string target)
     {
         var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };

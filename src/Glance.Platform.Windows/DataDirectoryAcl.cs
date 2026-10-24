@@ -76,10 +76,11 @@ public static partial class DataDirectoryAcl
     /// Makes <paramref name="root"/> hardened (see <see cref="Hardened"/>). When it was not already, everything inside
     /// is reset too: owned by Administrators and explicit entries dropped so only the root's are inherited, since any
     /// local user could have planted them before.
-    /// When the root already is hardened, its contents are walked without following links: every entry owned by someone
-    /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened).
-    /// Either way links are deleted first, before any DACL changes, and are never followed or re-permissioned (see
-    /// <see cref="RemoveLinks"/>); a deletion makes the result Tightened.
+    /// When the root already is hardened, only entries owned by someone else, carrying explicit entries or with an
+    /// unreadable descriptor are reset (the result is then Tightened).
+    /// Either way the tree is walked by <see cref="Walk"/>: each directory is locked by handle before its contents are
+    /// looked at, links are deleted (never followed or re-permissioned; a deletion makes the result Tightened) and no
+    /// descriptor change propagates.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
     public static AclResult Enforce(string root)
@@ -94,8 +95,7 @@ public static partial class DataDirectoryAcl
             // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
             Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
             var changed = false;
-            RemoveLinks(dir, "", actions, ref changed);   // before any child's DACL changes: that propagates downwards
-            ResetUntrustedChildren(dir, "", actions, ref changed);
+            Walk(dir, "", isRoot: true, resetAll: false, actions, ref changed, HandleSteps.Instance);
             return new AclResult(changed ? Outcome.Tightened : Outcome.AlreadySecure, null, actions);
         }
         var ownerTrusted = IsTrustedOwner(current.GetOwner(typeof(SecurityIdentifier)));
@@ -103,11 +103,7 @@ public static partial class DataDirectoryAcl
         // To set an owner on objects we cannot open otherwise, and to read link counts whatever a planted DACL says.
         Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
         var removed = false;
-        // Links go before the root DACL changes: a new DACL propagates to the children, a hard-linked file among them.
-        RemoveLinks(dir, "", actions, ref removed);
-        dir.SetAccessControl(OwnerOnly<DirectorySecurity>());   // owner first: the old DACL may not let us write a new one
-        dir.SetAccessControl(Hardened());
-        ResetChildren(dir, "", actions, ref removed);
+        Walk(dir, "", isRoot: true, resetAll: true, actions, ref removed, HandleSteps.Instance);
         actions.Add("reset the data directory and everything inside it");
         return new AclResult(ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken, null, actions);
     }
@@ -145,69 +141,101 @@ public static partial class DataDirectoryAcl
         return null;
     }
 
-    /// <summary>
-    /// Walks without following links; resets only the entries that need it (including ones whose descriptor cannot be
-    /// read: a planted DACL can deny even SYSTEM). Links are deleted first and count as a change.
-    /// </summary>
-    private static void ResetUntrustedChildren(DirectoryInfo dir, string relative, List<string> actions, ref bool changed)
+    /// <summary>The steps of <see cref="Walk"/>; a seam so tests can watch their order.</summary>
+    internal interface IWalkSteps
     {
+        /// <summary>Resets the entry's owner and DACL when <paramref name="resetAll"/> or when it needs it.</summary>
+        void Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed);
+
+        /// <summary>See <see cref="DataDirectoryAcl.RemoveIfLink"/>.</summary>
+        bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed);
+    }
+
+    internal enum EntryKind { Root, Directory, File }
+
+    /// <summary>
+    /// For each directory, the root first: (1) lock it through its own handle, so no untrusted user can add entries
+    /// from then on; (2) delete the links among its entries; (3) reset the remaining files through their own
+    /// handles; (4) recurse into the remaining subdirectories. Every descriptor is written by handle to that object
+    /// only, so a change never propagates to an entry that has not been checked yet (a hard link planted meanwhile,
+    /// say). With <paramref name="resetAll"/> every entry is reset; otherwise only those owned by someone else,
+    /// carrying explicit entries or with an unreadable descriptor, each recorded in the actions. Any reset or deletion
+    /// sets <paramref name="changed"/>.
+    /// </summary>
+    internal static void Walk(DirectoryInfo dir, string relative, bool isRoot, bool resetAll, List<string> actions, ref bool changed, IWalkSteps steps)
+    {
+        steps.Secure(dir, relative.Length == 0 ? "." : relative, isRoot ? EntryKind.Root : EntryKind.Directory, resetAll, actions, ref changed);
+        var remaining = new List<(FileSystemInfo Entry, string Rel)>();
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
             var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
-            if (RemoveIfLink(entry, rel, actions, ref changed)) continue;
-            if (entry is DirectoryInfo sub)
+            if (!steps.RemoveIfLink(entry, rel, actions, ref changed)) remaining.Add((entry, rel));
+        }
+        foreach (var (entry, rel) in remaining)
+            if (entry is not DirectoryInfo) steps.Secure(entry, rel, EntryKind.File, resetAll, actions, ref changed);
+        foreach (var (entry, rel) in remaining)
+            if (entry is DirectoryInfo sub) Walk(sub, rel, isRoot: false, resetAll, actions, ref changed, steps);
+    }
+
+    /// <summary>The real steps: every read and write goes through a handle on the entry itself, never by name.</summary>
+    internal sealed class HandleSteps : IWalkSteps
+    {
+        public static readonly HandleSteps Instance = new();
+
+        public void Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
+        {
+            bool becameLink;
+            using (var h = FileLinks.OpenSecurity(entry.FullName))
             {
-                var reason = ReasonFor(() => sub.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
-                if (reason is not null)
+                if (kind == EntryKind.Root && h.Info.ReparseTag is not null)
+                    throw new IOException($"The data directory {entry.FullName} is a link; refusing to use it.");
+                // Checked again through this handle: an entry that became a link is never re-permissioned.
+                becameLink = kind != EntryKind.Root && (h.Info.ReparseTag is not null || h.Info.IsHardLink);
+                if (!becameLink)
                 {
-                    sub.SetAccessControl(OwnerOnly<DirectorySecurity>());
-                    sub.SetAccessControl(InheritOnly<DirectorySecurity>());
-                    actions.Add($"{rel}: reset ({reason})");
+                    var reason = resetAll ? "" : ReasonFor(h.ReadDescriptor(), kind != EntryKind.File);
+                    if (reason is null) return;
+                    h.WriteDescriptor(Descriptor(kind, AdminsSid));
+                    if (!resetAll) actions.Add($"{rel}: reset ({reason})");
                     changed = true;
                 }
-                ResetUntrustedChildren(sub, rel, actions, ref changed);
             }
-            else if (entry is FileInfo file)
-            {
-                var reason = ReasonFor(() => file.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
-                if (reason is null) continue;
-                file.SetAccessControl(OwnerOnly<FileSecurity>());
-                file.SetAccessControl(InheritOnly<FileSecurity>());
-                actions.Add($"{rel}: reset ({reason})");
-                changed = true;
-            }
+            if (becameLink) DataDirectoryAcl.RemoveIfLink(entry, rel, actions, ref changed);
         }
+
+        public bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed) =>
+            DataDirectoryAcl.RemoveIfLink(entry, rel, actions, ref changed);
     }
 
     /// <summary>
-    /// Deletes every link under <paramref name="dir"/> (see <see cref="RemoveIfLink"/>) before any ACL there changes,
-    /// since setting a directory's DACL propagates inherited entries into its children. A directory that cannot be
-    /// listed yet (a planted DACL) is skipped with an action: the ACL walk, which checks every entry for links again,
-    /// covers it once it has been reset.
+    /// A self-relative descriptor owned by <paramref name="owner"/> granting SYSTEM and Administrators full control:
+    /// for the root protected and inheritable (as <see cref="Hardened"/>), below it exactly what the root passes down.
     /// </summary>
-    internal static void RemoveLinks(DirectoryInfo dir, string relative, List<string> actions, ref bool changed)
+    internal static byte[] Descriptor(EntryKind kind, SecurityIdentifier owner)
     {
-        List<FileSystemInfo> entries;
-        try { entries = dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList(); }
-        catch (UnauthorizedAccessException)
+        var flags = kind switch
         {
-            actions.Add($"{(relative.Length == 0 ? "." : relative)}: not listable before the reset; its links are removed during it");
-            return;
-        }
-        foreach (var entry in entries)
-        {
-            var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
-            if (RemoveIfLink(entry, rel, actions, ref changed)) continue;
-            if (entry is DirectoryInfo sub) RemoveLinks(sub, rel, actions, ref changed);
-        }
+            EntryKind.Root => AceFlags.ContainerInherit | AceFlags.ObjectInherit,
+            EntryKind.Directory => AceFlags.ContainerInherit | AceFlags.ObjectInherit | AceFlags.Inherited,
+            _ => AceFlags.Inherited,
+        };
+        var dacl = new RawAcl(GenericAcl.AclRevision, 2);
+        dacl.InsertAce(0, new CommonAce(flags, AceQualifier.AccessAllowed, (int)FileSystemRights.FullControl, SystemSid, false, null));
+        dacl.InsertAce(1, new CommonAce(flags, AceQualifier.AccessAllowed, (int)FileSystemRights.FullControl, AdminsSid, false, null));
+        var control = ControlFlags.DiscretionaryAclPresent | ControlFlags.SelfRelative
+            | (kind == EntryKind.Root ? ControlFlags.DiscretionaryAclProtected : ControlFlags.DiscretionaryAclAutoInherited);
+        var sd = new RawSecurityDescriptor(control, owner, null, null, dacl);
+        var bytes = new byte[sd.BinaryLength];
+        sd.GetBinaryForm(bytes, 0);
+        return bytes;
     }
 
     /// <summary>
     /// Deletes <paramref name="entry"/> when it is a symbolic link or junction, or a hard link (a file with more than
     /// one name): following the one or re-permissioning the other would change something outside the data directory.
     /// Any other reparse point (a compressed or cloud placeholder file, say) is not followed, not recursed into and
-    /// left alone: .NET reads and writes ACLs by name, which cannot be guaranteed not to reach through it. Every entry
-    /// is read, and deleted, through one handle that never follows a link, whatever the enumeration reported.
+    /// left alone: what such a reparse point does with its own descriptor is up to its filter driver. Every entry is
+    /// read, and deleted, through one handle that never follows a link, whatever the enumeration reported.
     /// True when the caller must skip the entry (deleted, left alone, or gone already).
     /// </summary>
     internal static bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed)
@@ -228,48 +256,15 @@ public static partial class DataDirectoryAcl
         return false;
     }
 
-    private static string? ReasonFor(Func<FileSystemSecurity> read)
+    private static string? ReasonFor(byte[]? descriptor, bool directory)
     {
-        try { return ResetReason(read()); }
-        catch (UnauthorizedAccessException) { return "security descriptor unreadable"; }
+        if (descriptor is null) return "security descriptor unreadable";
+        FileSystemSecurity sec = directory ? new DirectorySecurity() : new FileSecurity();
+        sec.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
+        return ResetReason(sec);
     }
 
     private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);
-
-    private static void ResetChildren(DirectoryInfo dir, string relative, List<string> actions, ref bool removed)
-    {
-        foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
-        {
-            var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
-            if (RemoveIfLink(entry, rel, actions, ref removed)) continue;
-            if (entry is DirectoryInfo sub)
-            {
-                sub.SetAccessControl(OwnerOnly<DirectorySecurity>());
-                sub.SetAccessControl(InheritOnly<DirectorySecurity>());
-                ResetChildren(sub, rel, actions, ref removed);
-            }
-            else if (entry is FileInfo file)
-            {
-                file.SetAccessControl(OwnerOnly<FileSecurity>());
-                file.SetAccessControl(InheritOnly<FileSecurity>());
-            }
-        }
-    }
-
-    private static T OwnerOnly<T>() where T : FileSystemSecurity, new()
-    {
-        var s = new T();
-        s.SetOwner(AdminsSid);
-        return s;
-    }
-
-    /// <summary>No explicit entries and not protected: the object gets exactly what its parent passes down.</summary>
-    private static T InheritOnly<T>() where T : FileSystemSecurity, new()
-    {
-        var s = new T();
-        s.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
-        return s;
-    }
 
     private static partial class Privileges
     {
