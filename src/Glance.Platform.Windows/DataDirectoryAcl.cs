@@ -76,6 +76,9 @@ public static partial class DataDirectoryAcl
     /// Makes <paramref name="root"/> hardened (see <see cref="Hardened"/>). When it was not already, everything inside
     /// is reset too: owned by Administrators, explicit entries dropped so only the root's are inherited, and links
     /// (reparse points) removed without following them, since any local user could have planted them before.
+    /// When the root already is hardened, its contents are walked without following links: every entry owned by someone
+    /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened); links are
+    /// only reported in the actions and do not change the outcome.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
     public static AclResult Enforce(string root)
@@ -89,8 +92,9 @@ public static partial class DataDirectoryAcl
         {
             // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
             Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");
-            ResetUntrustedChildren(dir, "", actions);
-            return new AclResult(actions.Count == 0 ? Outcome.AlreadySecure : Outcome.Tightened, null, actions);
+            var changed = false;
+            ResetUntrustedChildren(dir, "", actions, ref changed);
+            return new AclResult(changed ? Outcome.Tightened : Outcome.AlreadySecure, null, actions);
         }
         var ownerTrusted = IsTrustedOwner(current.GetOwner(typeof(SecurityIdentifier)));
 
@@ -116,8 +120,11 @@ public static partial class DataDirectoryAcl
         return null;
     }
 
-    /// <summary>Walks without following links; resets only the entries that need it. Links are left to the link handling.</summary>
-    private static void ResetUntrustedChildren(DirectoryInfo dir, string relative, List<string> actions)
+    /// <summary>
+    /// Walks without following links; resets only the entries that need it (including ones whose descriptor cannot be
+    /// read: a planted DACL can deny even SYSTEM). Links are left to the link handling and never count as a change.
+    /// </summary>
+    private static void ResetUntrustedChildren(DirectoryInfo dir, string relative, List<string> actions, ref bool changed)
     {
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
@@ -130,24 +137,32 @@ public static partial class DataDirectoryAcl
             }
             if (entry is DirectoryInfo sub)
             {
-                var reason = ResetReason(sub.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+                var reason = ReasonFor(() => sub.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
                 if (reason is not null)
                 {
                     sub.SetAccessControl(OwnerOnly<DirectorySecurity>());
                     sub.SetAccessControl(InheritOnly<DirectorySecurity>());
                     actions.Add($"{rel}: reset ({reason})");
+                    changed = true;
                 }
-                ResetUntrustedChildren(sub, rel, actions);
+                ResetUntrustedChildren(sub, rel, actions, ref changed);
             }
             else if (entry is FileInfo file)
             {
-                var reason = ResetReason(file.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+                var reason = ReasonFor(() => file.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
                 if (reason is null) continue;
                 file.SetAccessControl(OwnerOnly<FileSecurity>());
                 file.SetAccessControl(InheritOnly<FileSecurity>());
                 actions.Add($"{rel}: reset ({reason})");
+                changed = true;
             }
         }
+    }
+
+    private static string? ReasonFor(Func<FileSystemSecurity> read)
+    {
+        try { return ResetReason(read()); }
+        catch (UnauthorizedAccessException) { return "security descriptor unreadable"; }
     }
 
     private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);

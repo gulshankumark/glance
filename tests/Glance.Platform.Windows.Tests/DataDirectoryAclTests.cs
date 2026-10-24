@@ -183,6 +183,52 @@ public class DataDirectoryAclTests
     }
 
     [Fact, Trait("Category", "Hardware")]
+    public void Hardened_root_with_unreadable_child_resets_it_instead_of_throwing()
+    {
+        var me = WindowsIdentity.GetCurrent().User!;
+        var result = EnforceHardenedRootWith(r =>
+        {
+            var sub = Directory.CreateDirectory(Path.Combine(r, "planted"));
+            var sec = new DirectorySecurity();
+            sec.SetOwner(me);
+            sec.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            sec.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            sub.SetAccessControl(sec);   // only the current user; SYSTEM/Administrators cannot even read it
+        }, out var root, out var dir);
+        using (dir)
+        {
+            Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
+            Assert.Contains(result.Actions, a => a.Contains("planted"));
+            var after = new DirectoryInfo(Path.Combine(root, "planted")).GetAccessControl();
+            Assert.Equal(AdminsSid, after.GetOwner(typeof(SecurityIdentifier)));
+            Assert.Empty(after.GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier)));
+        }
+    }
+
+    [Fact, Trait("Category", "Hardware")]
+    public void Hardened_root_with_only_a_link_is_AlreadySecure_and_leaves_link_and_target_alone()
+    {
+        string? target = null;
+        string? link = null;
+        string before = "";
+        var result = EnforceHardenedRootWith(r =>
+        {
+            target = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(r)!, "elsewhere")).FullName;
+            before = new DirectoryInfo(target).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.All);
+            link = Path.Combine(r, "logs");
+            Directory.CreateSymbolicLink(link, target);
+        }, out _, out var dir);
+        using (dir)
+        {
+            Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
+            Assert.Contains(result.Actions, a => a.Contains("logs"));
+            Assert.True(Directory.Exists(link));
+            Assert.Equal(before, new DirectoryInfo(target!).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.All));
+        }
+    }
+
+    [Fact, Trait("Category", "Hardware")]
     public void Hardened_root_with_clean_children_is_AlreadySecure()
     {
         var result = EnforceHardenedRootWith(r =>
