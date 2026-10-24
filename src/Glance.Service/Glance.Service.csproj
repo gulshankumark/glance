@@ -25,7 +25,7 @@
        goes stale when Vite replaces the hashed bundle) and added to the publish list from a fresh glob instead.
        Plain build/test never runs npm. -p:SkipWebBuild=true publishes the wwwroot that is already there. -->
   <ItemGroup>
-    <Content Include="themes\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="themes\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Remove="wwwroot\**" />
     <None Remove="wwwroot\**" />
   </ItemGroup>
