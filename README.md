@@ -137,6 +137,10 @@ The install folder must be inside `C:\Program Files`. The service runs as SYSTEM
 `Glance-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG=C:\Temp\glance-setup.log` installs with the default
 choices and never opens a browser. Run it from an elevated prompt.
 
+If TRCC is running, the wizard asks you to close it and offers to remove its logon task (`TRCCAppStartup`); it
+never closes TRCC itself. A silent install only notes a running TRCC in the log and leaves TRCC and its logon task
+alone; Glance cannot drive the screen until TRCC is closed.
+
 | Switch | Effect |
 |---|---|
 | `/VERYSILENT` | No wizard and no progress window. |

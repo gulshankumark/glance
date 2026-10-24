@@ -36,6 +36,12 @@
 #define PawnIoService "PawnIO"
 #define PawnIoLink "https://pawnio.eu/"
 
+; TRCC, Thermalright's own software. Names only, found read-only on a machine with TRCC installed
+; (2026-10-24): logon task "\TRCCAppStartup" runs "C:\Program Files\TRCCCAP\TRCC.exe". Setup never
+; closes TRCC; in guided mode it asks the user to and offers to delete the logon task.
+#define TrccProcess "TRCC.exe"
+#define TrccTask "TRCCAppStartup"
+
 [Setup]
 ; AppId identifies Glance to Windows for upgrades and uninstall. Never change it.
 AppId={{B11BB4AD-5A77-4BA7-8412-FDE69D2F4CA9}
@@ -98,6 +104,9 @@ var
   PawnIoDownloadTried, PawnIoDownloaded: Boolean;
   { Download or install of PawnIO failed; the install continues without it. }
   PawnIoFailed: Boolean;
+  { Guided-mode page shown when TRCC is running or starts at logon. }
+  TrccPage: TInputOptionWizardPage;
+  TrccTaskFound: Boolean;
 
 function ScExe: String;
 begin
@@ -380,10 +389,56 @@ begin
       'is not present.');
 end;
 
+{ tasklist prints one CSV line per matching process, or an INFO line when none matches. }
+function TrccRunning: Boolean;
+var
+  Code: Integer;
+  Output: String;
+begin
+  Output := RunAndCapture(ExpandConstant('{sys}\tasklist.exe'), '/FI "IMAGENAME eq {#TrccProcess}" /FO CSV /NH', Code);
+  Result := (Code = 0) and (Pos('"' + Lowercase('{#TrccProcess}') + '"', Lowercase(Output)) > 0);
+  if Result then
+    Log('TRCC ({#TrccProcess}) is running.');
+end;
+
+function TrccTaskExists: Boolean;
+begin
+  Result := RunHidden(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN "{#TrccTask}"') = 0;
+end;
+
+{ Deletes TRCC's logon task if the user ticked the box on the TRCC page (guided mode only). }
+procedure RemoveTrccTaskIfChosen;
+begin
+  if WizardSilent or not TrccTaskFound or not TrccPage.Values[0] then
+    Exit;
+  if RunHidden(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "{#TrccTask}" /F') = 0 then
+    Log('Removed TRCC''s logon task "{#TrccTask}".')
+  else
+    Log('Could not remove TRCC''s logon task "{#TrccTask}".');
+end;
+
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage('Downloading PawnIO',
     'Setup is downloading the PawnIO driver from its official release.', nil);
+
+  TrccTaskFound := TrccTaskExists;
+  TrccPage := CreateInputOptionPage(wpSelectTasks, 'TRCC',
+    'Close Thermalright''s TRCC software before continuing.',
+    'Glance and TRCC cannot drive the screen at the same time. If TRCC is running, close it now ' +
+    '(exit it from its tray icon), then click Next. Setup does not close it for you.',
+    False, False);
+  TrccPage.Add('Remove TRCC''s logon task, so TRCC no longer starts with Windows (TRCC stays installed)');
+  TrccPage.Values[0] := False;
+  TrccPage.CheckListBox.Visible := TrccTaskFound;
+end;
+
+{ The TRCC page appears only when TRCC is running or starts at logon. }
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if PageID = TrccPage.ID then
+    Result := not TrccTaskFound and not TrccRunning;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -393,6 +448,14 @@ begin
   begin
     MsgBox(ProgramFilesMessage, mbError, MB_OK);
     Result := False;
+  end
+  else if (CurPageID = TrccPage.ID) and not WizardSilent then
+  begin
+    { No = stay on the page, close TRCC and click Next again (retry); Yes = continue anyway. }
+    if TrccRunning then
+      Result := MsgBox('TRCC is still running. Glance will show the screen as busy until TRCC is closed.' +
+        #13#10#13#10 + 'Continue anyway? Click No to close TRCC first and try again.',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end
   else if (CurPageID = wpReady) and not WizardSilent then
     DownloadPawnIo;
@@ -440,6 +503,10 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  { Silent mode never closes TRCC or touches its logon task: log it and go on. The service shows the
+    screen as busy until TRCC exits. }
+  if WizardSilent and TrccRunning then
+    Log('Silent install: TRCC is left running; Glance cannot drive the screen until it is closed.');
   if not IsUnderProgramFiles(ExpandConstant('{app}')) then
   begin
     Result := ProgramFilesMessage;
@@ -467,6 +534,7 @@ begin
   if CurStep <> ssPostInstall then
     Exit;
   InstallFinished := True;
+  RemoveTrccTaskIfChosen;
 
   { 1. Hardened %ProgramData%\Glance before the service first runs. An existing directory is left
        as it is; the service is the authority on it. }
