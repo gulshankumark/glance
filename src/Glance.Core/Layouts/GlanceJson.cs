@@ -56,8 +56,9 @@ public static class AtomicFile
         try
         {
             writeTemp(tmp);
-            // A reader (config reload, antivirus) can hold the target open for a moment; retry briefly.
-            for (var attempt = 1; ; attempt++)
+            // A reader (config reload, antivirus) can hold the target open for a moment; retry for up to 2 s.
+            var deadline = Environment.TickCount64 + 2000;
+            while (true)
             {
                 try
                 {
@@ -65,7 +66,7 @@ public static class AtomicFile
                     else File.Move(tmp, path);
                     return;
                 }
-                catch (IOException) when (attempt < 20) { Thread.Sleep(25); }
+                catch (IOException) when (Environment.TickCount64 < deadline) { Thread.Sleep(25); }
             }
         }
         finally
