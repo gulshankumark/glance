@@ -354,7 +354,7 @@ public class DataDirectoryAclTests
             h.WriteDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, me));
 
         var sddl = LinkFixtures.Sddl(target);
-        Assert.StartsWith($"O:{me.Value}", sddl);
+        Assert.Equal(me, new RawSecurityDescriptor(sddl).Owner);   // compare SIDs: SDDL may abbreviate a well-known owner (e.g. "LA")
         // Protected and auto-inherited (so new children's entries are stored as inherited), SYSTEM + Administrators only.
         Assert.Contains("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", sddl);
         Assert.Equal(childBefore, LinkFixtures.RawSddl(child));   // the stored descriptor: nothing propagated

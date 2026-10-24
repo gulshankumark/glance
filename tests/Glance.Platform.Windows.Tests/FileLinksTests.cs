@@ -97,8 +97,10 @@ public class FileLinksTests
 
         Assert.Equal("hello", File.ReadAllText(file));
         var sddl = LinkFixtures.RawSddl(file);
-        Assert.StartsWith($"O:{WindowsIdentity.GetCurrent().User!.Value}D:P", sddl);   // protected: nothing inherited
-        Assert.Single(new RawSecurityDescriptor(sddl).DiscretionaryAcl!.Cast<GenericAce>());
+        var raw = new RawSecurityDescriptor(sddl);
+        Assert.Equal(WindowsIdentity.GetCurrent().User, raw.Owner);   // compare SIDs: SDDL may abbreviate a well-known owner (e.g. "LA")
+        Assert.True(raw.ControlFlags.HasFlag(ControlFlags.DiscretionaryAclProtected));   // protected: nothing inherited
+        Assert.Single(raw.DiscretionaryAcl!.Cast<GenericAce>());
         Assert.Throws<IOException>(() => FileLinks.CreateNew(file, OnlyMe(), "again"u8));
         Assert.Equal("hello", File.ReadAllText(file));
     }
