@@ -194,10 +194,16 @@ Rules, one commit each:
 
 **Interfaces:**
 - Consumes: `AclResult` (Task 4), `FileLinks` (Task 5), `NoticeBoard` (Task 3).
-- Produces: `public interface ITakeoverMarker { string? Read(); void Write(string quarantineDirName); void Clear(); }`; production `RegistryTakeoverMarker` (HKLM `SOFTWARE\Glance`, value `TakeoverPending`); tests use an in-memory fake. `Enforce(string root, ITakeoverMarker marker)`.
+- Produces: `public interface ITakeoverMarker { string? Read(); void Write(string quarantineDirName); void Clear(); }`; production `FileTakeoverMarker` (file `<parent of root>\Glance.takeover-pending`, i.e. `%ProgramData%\Glance.takeover-pending` for the default root); tests use an in-memory fake plus temp-dir tests of `FileTakeoverMarker`. `Enforce(string root, ITakeoverMarker marker)`. Nothing is written to the registry (owner's decision).
 - Produces: quarantine folder `quarantine-<UTC yyyyMMddTHHmmssZ>` in the root.
 
-**Deviation from spec wording (planner's call):** the spec's `takeover-pending` marker lives in the registry, not the root. A file in the root cannot be written before ownership is taken, so a crash between "take ownership" and "write marker" would leave planted files that the next start would merely reset (I5a) and trust. HKLM is writable only by SYSTEM/Administrators, so writing the marker there *first* closes the window.
+**Marker placement (owner's decision: a file in ProgramData, no registry):** the marker sits next to the data dir, not inside it. A file in the root cannot be written before ownership is taken, so a crash between "take ownership" and "write marker" would leave planted files that the next start would merely reset (I5a) and trust. Writing the sibling file *first* closes that window.
+
+`FileTakeoverMarker` rules (any user can create files in `%ProgramData%`, so the file must prove it came from us):
+- `Write`: if a file already exists, delete it (Administrators/SYSTEM can always take ownership and delete); create it fresh with owner Administrators, DACL SYSTEM + Administrators full control only, inheritance off; content = quarantine folder name; write via temp file + rename in the same directory, then re-apply the ACL.
+- `Read`: returns the content only when the file is owned by SYSTEM/Administrators, has no inherited ACEs and no ACE granting write/delete to anyone else, is not a reparse point, and the content matches `^quarantine-\d{8}T\d{6}Z$`. Otherwise the file is untrusted: delete it, log a warning, return null.
+- `Clear`: delete the file; missing file is fine.
+- A user cannot delete or edit the trusted file (its DACL denies them, and Users lack delete-child on `%ProgramData%`), so they can neither forge a resume nor cancel one.
 
 Order (spec §6.3), when ownership must be taken (`OwnershipTaken` today) or the marker is set:
 1. Write the marker (target quarantine folder name).
@@ -208,7 +214,7 @@ Order (spec §6.3), when ownership must be taken (`OwnershipTaken` today) or the
 
 On startup with the marker set: resume from step 2 using the folder named in the marker (each step is idempotent). Service then starts with defaults (fresh settings, keys, layouts; themes reseed via Task 11) and adds notice id `quarantine-<timestamp>`, severity `warning`, text: `Glance found files in its data folder it couldn't trust and moved them to <folder>. Settings were reset; set your password again if you use network access.` Log a warning with the folder path.
 
-- [ ] **Step 1: Failing tests** — `Takeover_with_planted_settings_quarantines_everything` (user-owned root with `settings.json`, `keys/`, `https.pfx`, `layouts/x.json` → all under `quarantine-*`, root hardened, outcome `Quarantined`); `Crash_after_ownership_resumes_on_next_start` (root already hardened + fake marker set + planted files → `Enforce` quarantines them, marker cleared, outcome `Quarantined`); `Crash_mid_move_resumes_into_same_folder` (half the files already in the named quarantine folder → all end up there, one folder only); `Marker_is_written_before_ownership_changes` (fake marker records call order against a fake ACL step, or assert marker set when step 2 throws); `Existing_quarantine_folders_are_not_nested`; `Registry_marker_round_trips` (elevated); service test `Quarantine_raises_notice`.
+- [ ] **Step 1: Failing tests** — `Takeover_with_planted_settings_quarantines_everything` (user-owned root with `settings.json`, `keys/`, `https.pfx`, `layouts/x.json` → all under `quarantine-*`, root hardened, outcome `Quarantined`); `Crash_after_ownership_resumes_on_next_start` (root already hardened + fake marker set + planted files → `Enforce` quarantines them, marker cleared, outcome `Quarantined`); `Crash_mid_move_resumes_into_same_folder` (half the files already in the named quarantine folder → all end up there, one folder only); `Marker_is_written_before_ownership_changes` (fake marker records call order against a fake ACL step, or assert marker set when step 2 throws); `Existing_quarantine_folders_are_not_nested`; `File_marker_round_trips_with_hardened_acl`, `File_marker_owned_by_user_is_ignored_and_deleted`, `File_marker_with_bad_content_is_ignored`, `File_marker_that_is_a_symlink_is_ignored`, `Write_replaces_a_preplanted_user_file` (all elevated, temp parent dir); service test `Quarantine_raises_notice`.
 - [ ] **Step 2:** Run `DataDirectoryAclTests` elevated → FAIL.
 - [ ] **Step 3:** Implement; document the order in `Enforce`'s summary.
 - [ ] **Step 4:** Run → PASS; `dotnet test` → PASS.
