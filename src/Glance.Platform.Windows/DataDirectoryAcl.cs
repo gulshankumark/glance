@@ -269,7 +269,30 @@ public static partial class DataDirectoryAcl
         }
         FileSystemSecurity sec = kind != EntryKind.File ? new DirectorySecurity() : new FileSecurity();
         sec.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
-        return ResetReason(sec);
+        if (ResetReason(sec) is { } reason) return reason;
+        // Owner and explicit entries are fine; the inherited ones must be exactly what the locked parent passes down.
+        // Not so after a walk was interrupted: a child created before then keeps what %ProgramData% passed down
+        // (Users may create entries, CREATOR OWNER), and nothing re-derives it now that nothing propagates.
+        var expected = new RawSecurityDescriptor(Descriptor(kind, AdminsSid), 0);
+        var actual = new RawSecurityDescriptor(descriptor, 0);
+        if (actual.ControlFlags.HasFlag(ControlFlags.DiscretionaryAclProtected) || !SameEntries(actual.DiscretionaryAcl, expected.DiscretionaryAcl))
+            return "inherited access entries differ from the hardened set";
+        return null;
+    }
+
+    /// <summary>The same entries as a multiset (type, flags, rights, SID): order does not matter.</summary>
+    private static bool SameEntries(RawAcl? a, RawAcl? b)
+    {
+        static List<string> Keys(RawAcl? acl)
+        {
+            var keys = new List<string>();
+            if (acl is null) return keys;
+            foreach (GenericAce ace in acl)
+                keys.Add(ace is KnownAce k ? $"{k.AceType}|{k.AceFlags}|{k.AccessMask:X8}|{k.SecurityIdentifier.Value}" : $"other|{ace.AceType}");
+            keys.Sort(StringComparer.Ordinal);
+            return keys;
+        }
+        return a is not null && b is not null && Keys(a).SequenceEqual(Keys(b));
     }
 
     private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);

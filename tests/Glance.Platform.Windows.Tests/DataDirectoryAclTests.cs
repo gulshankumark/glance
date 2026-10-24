@@ -331,6 +331,92 @@ public class DataDirectoryAclTests
         Assert.Empty(second.Actions);
     }
 
+    private const AceFlags DirInherited = AceFlags.ContainerInherit | AceFlags.ObjectInherit | AceFlags.Inherited;
+    private static readonly SecurityIdentifier UsersSid = new(WellKnownSidType.BuiltinUsersSid, null);
+    private static readonly SecurityIdentifier CreatorOwnerSid = new(WellKnownSidType.CreatorOwnerSid, null);
+
+    /// <summary>A child descriptor (inheriting, not protected) with exactly these entries, in this order.</summary>
+    private static byte[] Child(SecurityIdentifier owner, params (SecurityIdentifier Sid, AceFlags Flags, FileSystemRights Rights)[] aces)
+    {
+        var dacl = new RawAcl(GenericAcl.AclRevision, aces.Length);
+        for (var i = 0; i < aces.Length; i++)
+            dacl.InsertAce(i, new CommonAce(aces[i].Flags, AceQualifier.AccessAllowed, (int)aces[i].Rights, aces[i].Sid, false, null));
+        var sd = new RawSecurityDescriptor(ControlFlags.DiscretionaryAclPresent | ControlFlags.DiscretionaryAclAutoInherited | ControlFlags.SelfRelative,
+            owner, null, null, dacl);
+        var bytes = new byte[sd.BinaryLength];
+        sd.GetBinaryForm(bytes, 0);
+        return bytes;
+    }
+
+    [Fact]
+    public void A_child_is_fine_only_with_exactly_the_hardened_set()
+    {
+        const DataDirectoryAcl.EntryKind dirKind = DataDirectoryAcl.EntryKind.Directory, fileKind = DataDirectoryAcl.EntryKind.File;
+        const FileSystemRights full = FileSystemRights.FullControl;
+        const string differs = "inherited access entries differ from the hardened set";
+
+        // What Descriptor produces, owned by Administrators or SYSTEM: fine.
+        Assert.Null(DataDirectoryAcl.ReasonFor(DataDirectoryAcl.Descriptor(dirKind, AdminsSid), dirKind));
+        Assert.Null(DataDirectoryAcl.ReasonFor(DataDirectoryAcl.Descriptor(fileKind, AdminsSid), fileKind));
+        Assert.Null(DataDirectoryAcl.ReasonFor(Child(SystemSid, (SystemSid, DirInherited, full), (AdminsSid, DirInherited, full)), dirKind));
+        // The same set in another order: fine (a set, not a string).
+        Assert.Null(DataDirectoryAcl.ReasonFor(Child(AdminsSid, (AdminsSid, DirInherited, full), (SystemSid, DirInherited, full)), dirKind));
+
+        // Left over from %ProgramData% by an interrupted walk: an inherited Users entry, or CREATOR OWNER.
+        Assert.Equal(differs, DataDirectoryAcl.ReasonFor(Child(AdminsSid,
+            (SystemSid, DirInherited, full), (AdminsSid, DirInherited, full), (UsersSid, DirInherited, FileSystemRights.CreateFiles)), dirKind));
+        Assert.Equal(differs, DataDirectoryAcl.ReasonFor(Child(AdminsSid,
+            (SystemSid, DirInherited, full), (AdminsSid, DirInherited, full),
+            (CreatorOwnerSid, DirInherited | AceFlags.InheritOnly, full)), dirKind));
+        Assert.Equal(differs, DataDirectoryAcl.ReasonFor(Child(AdminsSid,
+            (SystemSid, AceFlags.Inherited, full), (AdminsSid, AceFlags.Inherited, full), (UsersSid, AceFlags.Inherited, FileSystemRights.Read)), fileKind));
+        // Missing an entry, or the wrong flags for the kind: reset as well.
+        Assert.Equal(differs, DataDirectoryAcl.ReasonFor(Child(AdminsSid, (SystemSid, DirInherited, full)), dirKind));
+        Assert.Equal(differs, DataDirectoryAcl.ReasonFor(DataDirectoryAcl.Descriptor(fileKind, AdminsSid), dirKind));
+
+        // The earlier reasons still come first.
+        Assert.Equal("owner is not SYSTEM/Administrators",
+            DataDirectoryAcl.ReasonFor(DataDirectoryAcl.Descriptor(dirKind, UsersSid), dirKind));
+        Assert.Equal("has explicit access entries", DataDirectoryAcl.ReasonFor(Child(AdminsSid,
+            (SystemSid, DirInherited, full), (AdminsSid, DirInherited, full), (UsersSid, AceFlags.None, full)), dirKind));
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Interrupted_walk_leaves_no_inherited_user_access_after_the_next_Enforce()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance"));
+        // Like %ProgramData%: Users may create entries, and children inherit that.
+        var open = new DirectorySecurity();
+        open.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[] { SystemSid, AdminsSid, UsersSid })
+            open.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        root.SetAccessControl(open);
+        var layouts = Directory.CreateDirectory(Path.Combine(root.FullName, "layouts")).FullName;
+        var file = Path.Combine(layouts, "a.json");
+        File.WriteAllText(file, "{}");
+        // The interrupted walk: only the root was locked, by handle, so nothing propagated.
+        using (var h = FileLinks.OpenSecurity(root.FullName))
+            h.WriteDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, AdminsSid));
+        Assert.Contains("BU", LinkFixtures.RawSddl(layouts));
+
+        var result = DataDirectoryAcl.Enforce(root.FullName);
+
+        Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
+        Assert.Contains(result.Actions, a => a.StartsWith("layouts: reset"));
+        Assert.Null(DataDirectoryAcl.ReasonFor(ReadRaw(layouts), DataDirectoryAcl.EntryKind.Directory));
+        Assert.Null(DataDirectoryAcl.ReasonFor(ReadRaw(file), DataDirectoryAcl.EntryKind.File));
+        Assert.DoesNotContain("BU", LinkFixtures.RawSddl(file));
+    }
+
+    private static byte[]? ReadRaw(string path)
+    {
+        using var h = FileLinks.OpenSecurity(path);
+        return h.ReadDescriptor();
+    }
+
     [Fact]
     public void Descriptors_below_the_root_carry_exactly_what_the_root_passes_down()
     {
