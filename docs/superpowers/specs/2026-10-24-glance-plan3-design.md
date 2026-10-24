@@ -81,10 +81,26 @@ Exit code non-zero on failure. Document the switches in the README.
   it — the service's I5b handling (§6) deals with it. (Designer's call: installer closes
   the window, service remains the authority.)
 - Registers the service (LocalSystem, automatic start), starts it, waits for it to
-  answer on the port (timeout ~30 s). On timeout: tell the user (guided) / non-zero exit
+  answer (timeout ~30 s). The installer runs elevated, so on upgrade it reads port and
+  scheme from the existing `settings.json`; fresh install uses `http` + 8735. For HTTPS
+  the readiness probe accepts the self-signed certificate (loopback only). On timeout: tell the user (guided) / non-zero exit
   (silent), point to the log. Do not roll back silently.
 - Upgrade: stop service, replace binaries, start service. Data dir untouched except
   themes (§4.4).
+
+### 3.5 Shortcut URL and firewall (service-owned)
+- **Shortcut URL** (Plan 1 follow-ups Task 14 ruling): the Start-menu / desktop
+  shortcuts and Finish page must open the URL derived from current settings (scheme +
+  port), not a hardcoded link. Users cannot read the hardened data dir, so the
+  **service** writes the `.url` shortcut file(s) in the common Start-menu (and desktop,
+  if chosen — installer records the choice) on every start and whenever port or HTTPS
+  changes. The installer creates the initial shortcut; the Finish page uses the same
+  derivation as the readiness check.
+- **Firewall** (parent design §9.1, owner's earlier decision): the rule exists only while
+  network access is on. The **service** (LocalSystem) adds/updates/removes it at runtime
+  — on start and on changes to `networkAccess` or `port`. Rule has a fixed name so it can
+  be found; uninstall removes it. This is new service work with tests (rule logic behind
+  an interface; real `netsh`/COM call smoke-tested on hardware).
 - Uninstall: stop and remove service, firewall rule; ask (guided) whether to delete the
   data directory; silent uninstall keeps it.
 
@@ -123,13 +139,18 @@ Uses existing item types only: `arcGauge`, `sparkline`, `historyGraph`, `bar` /
 - Every bundled font/image recorded in `THIRD-PARTY-NOTICES` with source URL and licence.
 
 ### 4.4 Shipping and first run
-- Themes ship as layout JSON (and any assets) in the install directory and are copied
-  into `<data>/layouts` on install/first start **only if a layout with that name does
-  not already exist** — never overwrite user edits. (Builder's call where the copy
-  happens; the service doing it on start also covers dev runs.)
-- First run: when a device is first seen and gets its `DeviceSettings`, set
-  `ActiveLayout` to **Blend** if it exists (today it is `null`, which shows the fallback
-  screen). Existing devices with a layout already chosen are not touched.
+- Themes ship as layout JSON (and any assets) in the install directory. The **service**
+  seeds them into `<data>/layouts` on start (covers install, upgrade and dev runs) and
+  never overwrites an existing layout of the same name.
+- **Deletion sticks:** the service records which theme names it has seeded (in settings
+  or a marker file). A seeded theme the user deleted is not copied back; a theme that is
+  new in an upgrade is seeded once. After a quarantine (§6.2) the record is gone with
+  the old settings, so all themes seed again.
+- **Default layout:** whenever seeding runs, every device whose `ActiveLayout` is `null`
+  **and** that has never had the default applied gets **Blend** (covers newly seen
+  devices and devices already known from a Plan 2 install). Record per device that the
+  default was applied, so a user who later clears the layout in the UI keeps the
+  fallback screen. Devices with a layout chosen are never touched.
 - Sensor bindings use roles (`cpu.temperature`, …) so they resolve on any machine.
 
 ## 5. New sensors
@@ -159,8 +180,15 @@ rules as today: links are deleted, never followed) and reset any entry whose own
 trusted or that has explicit (non-inherited) ACEs. The directory is small; cost is fine.
 `AlreadySecure` only when root **and** every child is clean.
 
+A child with an untrusted owner **under an already-hardened root** is only reset (owner
+→ Administrators), **not** a quarantine trigger: only SYSTEM/Administrators can create
+entries there, so such a file comes from an elevated admin (e.g. a layout copied in via
+Explorer), not an attacker. Quarantine (§6.2) triggers only on root takeover or an
+unfinished takeover (§6.3).
+
 **Tests:** root hardened + one child with a foreign explicit ACE → child reset, outcome
-is not `AlreadySecure`. Root hardened + child with untrusted owner → reset.
+is not `AlreadySecure`. Root hardened + child with untrusted owner → owner reset, no
+quarantine.
 
 ### 6.2 I5b — planted files trusted after takeover
 **Problem:** a local user creates `%ProgramData%\Glance` before install and plants
@@ -168,8 +196,8 @@ is not `AlreadySecure`. Root hardened + child with untrusted owner → reset.
 `kestrel.json`. On takeover the ACLs are fixed but the contents are trusted.
 
 **Fix (owner's decision: quarantine, start with defaults, tell the user):**
-- When enforcement had to take ownership (`OwnershipTaken`) — or I5a found an untrusted
-  child owner — move every existing entry in the data dir (except the new quarantine
+- When enforcement had to take ownership (`OwnershipTaken`) — or finds an unfinished
+  takeover (§6.3) — move every existing entry in the data dir (except the new quarantine
   folder) into `quarantine-<UTC timestamp>/` inside the data dir, then continue with an
   empty, hardened data dir. Settings, keys and certificate regenerate as on a fresh
   install. Layouts and media are quarantined too (designer's call: they are
@@ -185,6 +213,34 @@ is not `AlreadySecure`. Root hardened + child with untrusted owner → reset.
 **Tests:** takeover with planted `settings.json`/`keys` → files end up under
 `quarantine-*`, service starts with default settings, notice raised. No takeover → nothing
 moved.
+
+### 6.3 Crash safety of the takeover
+A crash between "ownership taken" and "contents quarantined" must not leave planted
+files trusted on the next start (the I5a flaw one step later). Order:
+1. Take ownership of the root and harden its DACL (root only; children untouched).
+2. Write a `takeover-pending` marker in the root.
+3. Move every other entry into `quarantine-<timestamp>/` (moves within one volume are
+   renames; contents are never opened or trusted).
+4. Harden the quarantine folder tree.
+5. Delete the marker, then continue normal startup (fresh settings, keys, themes).
+
+On start, a present marker means a takeover did not finish: resume from step 3 (anything
+outside existing `quarantine-*` folders and the marker gets quarantined). Test: simulate
+a crash after step 2 and after step 3 → the next run ends with the planted files
+quarantined and the notice raised.
+
+### 6.4 Plan 1 deferred hardening items (in scope)
+From the Plan 1 follow-ups ("deferred, Plan 3"), done with I5a/I5b because they touch
+the same walk:
+- **Hard links:** a file with link count > 1 is never re-ACL'd or re-owned in place (that
+  would change the security of a target outside the data dir). It is deleted (under
+  takeover: the link is removed, not moved). Test with a planted hard link.
+- Reparse handling limited to symlink / mount-point tags; links removed before the root
+  DACL is set.
+- `Enforce` failures also go to the service's file log (not only the Event Log), so the
+  installer's "see the log" points somewhere a user can find.
+- LoopbackFallback message shows the configured port; its self-probe 409 fixed.
+- Run the elevated ACL test on the real machine (part of the hardware smoke).
 
 ## 7. Per-field settings repair
 
@@ -221,13 +277,14 @@ call on shape; keep it minimal.
 
 1. Sensors: `memory.available`, `gpu.memory.used`.
 2. Settings per-field repair + notices API + banner.
-3. I5a.
-4. I5b (quarantine) on top of notices.
-5. Embedded JetBrains Mono.
-6. Theme shipping + first-run default.
-7. Themes, one commit each.
-8. Installer script, then silent mode, PawnIO, TRCC handling, uninstall.
-9. Hardware smoke on the real screen; owner reviews themes.
+3. I5a, plus §6.4 hardening items (one commit each).
+4. I5b quarantine with crash-safe marker (§6.3), on top of notices.
+5. Service-owned firewall rule and shortcut URL (§3.5).
+6. Embedded JetBrains Mono.
+7. Theme seeding (deletion sticks) + default-layout rule.
+8. Themes, one commit each.
+9. Installer script, then silent mode, PawnIO, TRCC handling, uninstall.
+10. Hardware smoke on the real screen (incl. elevated ACL test); owner reviews themes.
 
 ## 10. Decided by the owner
 - Plan 3 is Windows only; Linux next.
@@ -244,7 +301,14 @@ call on shape; keep it minimal.
 - Silent mode does not close TRCC.
 - Silent uninstall keeps the data dir.
 - Quarantine includes layouts and media, not just settings/keys.
-- New devices get Blend as active layout; themes never overwrite existing layouts.
+- Quarantine only on root takeover / unfinished takeover; a foreign-owned child under a
+  hardened root is just reset (it can only come from an admin).
+- Takeover is crash-safe via a `takeover-pending` marker.
+- Plan 1 deferred hardening items (hard links, reparse tags, file log, fallback port) are
+  in Plan 3.
+- Service owns the firewall rule and rewrites the shortcut URL at runtime.
+- Devices with no layout get Blend once (incl. existing Plan 2 devices); clearing it
+  later sticks. Deleted themes stay deleted.
 - One notice mechanism shared by settings repair and quarantine; banners dismissible.
 
 ## 12. Left to the builder
