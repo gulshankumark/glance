@@ -78,6 +78,11 @@ s.AddHostedService(sp => new ShortcutSync(
     [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), "Glance.url"),
      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), "Glance.url")],
     sp.GetRequiredService<ILogger<ShortcutSync>>()));
+s.AddSingleton<IFirewall, NetshFirewall>();
+s.AddHostedService(sp => new FirewallSync(
+    sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<WebBindingState>(),
+    sp.GetRequiredService<IFirewall>(), DataDirectoryAcl.IsElevated,
+    sp.GetRequiredService<ILogger<FirewallSync>>()));
 s.AddGlanceSecurity(paths);
 
 var app = builder.Build();
