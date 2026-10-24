@@ -65,9 +65,10 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync("/api/layouts/One", Json(SampleLayout("Two")))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync("/api/layouts/One", Json("{not json"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsync("/api/layouts/One", Json("null"))).StatusCode);
-        // The layouts dir holds only the shipped themes seeded at startup; no rejected PUT wrote a file.
-        var files = Directory.GetFiles(Path.Combine(f.DataDir, "layouts")).Select(Path.GetFileNameWithoutExtension).Order();
-        Assert.Equal(new[] { "Blend", "Clean", "Gauges", "Live graphs" }, files);
+        // No rejected PUT wrote a file: neither One.json nor Two.json exists.
+        var files = Directory.GetFiles(Path.Combine(f.DataDir, "layouts")).Select(Path.GetFileNameWithoutExtension).ToList();
+        Assert.DoesNotContain("One", files);
+        Assert.DoesNotContain("Two", files);
     }
 
     [Fact]

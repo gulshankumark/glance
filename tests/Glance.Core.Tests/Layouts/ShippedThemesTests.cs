@@ -27,7 +27,7 @@ public class ShippedThemesTests
     private static readonly string[] RequiredRoles =
     {
         Roles.CpuTemperature, Roles.CpuPowerPackage, Roles.CpuClock, Roles.CpuLoad,
-        Roles.GpuTemperature, Roles.GpuClock, Roles.GpuPower, Roles.GpuMemoryUsed,
+        Roles.GpuTemperature, Roles.GpuClock, Roles.GpuPower, Roles.GpuMemoryUsed, Roles.GpuMemoryLoad,
         Roles.MemoryUsed, Roles.MemoryAvailable,
     };
 
