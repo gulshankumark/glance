@@ -73,6 +73,11 @@ s.AddSingleton(sp => new DeviceManager(
     sp.GetRequiredService<ILoggerFactory>().CreateLogger<DeviceManager>()));
 s.AddHostedService(sp => sp.GetRequiredService<DeviceManager>());
 s.AddHostedService<CoreRunner>();
+s.AddHostedService(sp => new ShortcutSync(
+    sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<WebBindingState>(),
+    [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), "Glance.url"),
+     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), "Glance.url")],
+    sp.GetRequiredService<ILogger<ShortcutSync>>()));
 s.AddGlanceSecurity(paths);
 
 var app = builder.Build();
