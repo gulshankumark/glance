@@ -20,6 +20,22 @@
 ; Must match IFirewall.RuleName in src/Glance.Platform.Windows/IFirewall.cs.
 #define FirewallRuleName "Glance web UI"
 
+; PawnIO, the driver LibreHardwareMonitor needs for CPU and motherboard sensors. Downloaded at install
+; time, never bundled. Pinned: PawnIO 2.2.0 (released 2026-03-15), the official signed setup from
+; https://github.com/namazso/PawnIO.Setup, which https://pawnio.eu links as its download. Hash computed
+; on 2026-10-24; it matches the release's GitHub asset digest and the winget manifest namazso.PawnIO 2.2.0.
+; To update: change the version in the URL, then the hash (lowercase hex of the new PawnIO_setup.exe).
+#define PawnIoUrl "https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe"
+#ifndef PawnIoSha256
+  #define PawnIoSha256 "1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
+#endif
+; Silent install switch, from the winget-pkgs manifest namazso.PawnIO 2.2.0 (InstallerSwitches: Silent),
+; which also lists exit code 3010 (installed, restart required) as success. pawnio.eu does not document it.
+#define PawnIoArgs "-install -silent"
+; Must match PawnIo.ServiceName in src/Glance.Sensors.Windows/PawnIo.cs.
+#define PawnIoService "PawnIO"
+#define PawnIoLink "https://pawnio.eu/"
+
 [Setup]
 ; AppId identifies Glance to Windows for upgrades and uninstall. Never change it.
 AppId={{B11BB4AD-5A77-4BA7-8412-FDE69D2F4CA9}
@@ -47,9 +63,10 @@ SolidCompression=yes
 SetupLogging=yes
 
 [Tasks]
+; Hidden when the PawnIO service already exists (Check), so an upgrade never reinstalls it.
+Name: "pawnio"; Description: "PawnIO driver for CPU and motherboard sensors (downloaded from pawnio.eu)"; GroupDescription: "Drivers:"; Check: PawnIoMissing
 Name: "startmenu"; Description: "Start-menu shortcut"; GroupDescription: "Shortcuts:"
 Name: "desktopicon"; Description: "Desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-; Task 14 adds the "pawnio" task here (checked by default) together with its download step.
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -65,6 +82,7 @@ const
   ServiceStopTimeoutSeconds = 30;
   { Custom exit code of a silent install whose service did not register or answer (spec section 3.4). }
   NotReadyExitCode = 10;
+  PawnIoSetupName = 'PawnIO_setup.exe';
 
 var
   UiUrl: String;
@@ -74,6 +92,12 @@ var
   StoppedForUpgrade: Boolean;
   { Set at ssPostInstall: the new files are installed. }
   InstallFinished: Boolean;
+  { PawnIO: 0 = not checked yet, 1 = installed, 2 = missing. }
+  PawnIoState: Integer;
+  DownloadPage: TDownloadWizardPage;
+  PawnIoDownloadTried, PawnIoDownloaded: Boolean;
+  { Download or install of PawnIO failed; the install continues without it. }
+  PawnIoFailed: Boolean;
 
 function ScExe: String;
 begin
@@ -266,6 +290,102 @@ begin
     ', because its service runs as SYSTEM and folders elsewhere may be writable by ordinary users.';
 end;
 
+function PawnIoInstalled: Boolean;
+begin
+  Result := RunHidden(ScExe, 'query {#PawnIoService}') = 0;
+end;
+
+{ [Tasks] Check for the pawnio task: hidden when the driver is already installed. Cached, because
+  Setup calls Check functions more than once. }
+function PawnIoMissing: Boolean;
+begin
+  if PawnIoState = 0 then
+  begin
+    if PawnIoInstalled then
+    begin
+      PawnIoState := 1;
+      Log('PawnIO is already installed; the pawnio task is not offered.');
+    end
+    else
+      PawnIoState := 2;
+  end;
+  Result := PawnIoState = 2;
+end;
+
+function PawnIoUnavailableMessage: String;
+begin
+  Result := 'CPU and motherboard sensors are unavailable until PawnIO is installed: {#PawnIoLink}';
+end;
+
+{ PawnIO problems never fail the install: log them and tell the user on the Finish page. }
+procedure PawnIoFailure(const Reason: String);
+begin
+  PawnIoFailed := True;
+  Log('PawnIO: ' + Reason);
+  Log(PawnIoUnavailableMessage);
+end;
+
+{ Downloads the pinned PawnIO setup to Setup's temporary folder. Inno checks the SHA-256 and raises on a mismatch, so a
+  file with another hash is never run. Guided mode shows the download page (from the Ready page);
+  silent mode downloads without a page (from ssPostInstall). Runs at most once. }
+procedure DownloadPawnIo;
+begin
+  if PawnIoDownloadTried or not WizardIsTaskSelected('pawnio') then
+    Exit;
+  PawnIoDownloadTried := True;
+  Log('Downloading PawnIO from {#PawnIoUrl}');
+  try
+    if WizardSilent or (DownloadPage = nil) then
+      DownloadTemporaryFile('{#PawnIoUrl}', PawnIoSetupName, '{#PawnIoSha256}', nil)
+    else
+    begin
+      DownloadPage.Clear;
+      DownloadPage.Add('{#PawnIoUrl}', PawnIoSetupName, '{#PawnIoSha256}');
+      DownloadPage.Show;
+      try
+        DownloadPage.Download;
+      finally
+        DownloadPage.Hide;
+      end;
+    end;
+    PawnIoDownloaded := True;
+    Log('PawnIO downloaded; SHA-256 matches.');
+  except
+    PawnIoFailure('download failed: ' + GetExceptionMessage);
+  end;
+end;
+
+{ Runs the downloaded PawnIO setup silently. Called before the Glance service starts, so the service
+  sees the driver on its first start. 3010 means installed, restart required. }
+procedure InstallPawnIo;
+var
+  Code: Integer;
+begin
+  { The task may have been deselected (Back) after the Ready page downloaded the file. }
+  if not WizardIsTaskSelected('pawnio') then
+    Exit;
+  DownloadPawnIo;
+  if not PawnIoDownloaded then
+    Exit;
+  WizardForm.StatusLabel.Caption := 'Installing PawnIO...';
+  Code := RunHidden(ExpandConstant('{tmp}\') + PawnIoSetupName, '{#PawnIoArgs}');
+  if ((Code = 0) or (Code = 3010)) and PawnIoInstalled then
+  begin
+    Log('PawnIO installed.');
+    if Code = 3010 then
+      Log('PawnIO setup reports that Windows must restart to finish.');
+  end
+  else
+    PawnIoFailure('setup exited with code ' + IntToStr(Code) + ' and the {#PawnIoService} service ' +
+      'is not present.');
+end;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage('Downloading PawnIO',
+    'Setup is downloading the PawnIO driver from its official release.', nil);
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -273,6 +393,23 @@ begin
   begin
     MsgBox(ProgramFilesMessage, mbError, MB_OK);
     Result := False;
+  end
+  else if (CurPageID = wpReady) and not WizardSilent then
+    DownloadPawnIo;
+end;
+
+{ Guided mode: a PawnIO failure is added to the Finish page text; the run checkbox moves down to fit. }
+procedure CurPageChanged(CurPageID: Integer);
+var
+  OldHeight: Integer;
+begin
+  if (CurPageID = wpFinished) and PawnIoFailed then
+  begin
+    OldHeight := WizardForm.FinishedLabel.Height;
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+      PawnIoUnavailableMessage;
+    WizardForm.AdjustLabelHeight(WizardForm.FinishedLabel);
+    WizardForm.RunList.Top := WizardForm.RunList.Top + WizardForm.FinishedLabel.Height - OldHeight;
   end;
 end;
 
@@ -343,7 +480,10 @@ begin
   SyncShortcut(StartMenuShortcut, WizardIsTaskSelected('startmenu'));
   SyncShortcut(DesktopShortcut, WizardIsTaskSelected('desktopicon'));
 
-  { 3. Register (or reconfigure on upgrade) and start the service, then wait for it to answer. }
+  { 3. PawnIO before the service starts, so the service finds the driver. Failure is not fatal. }
+  InstallPawnIo;
+
+  { 4. Register (or reconfigure on upgrade) and start the service, then wait for it to answer. }
   WizardForm.StatusLabel.Caption := 'Starting the Glance service...';
   if not RegisterAndStartService then
   begin

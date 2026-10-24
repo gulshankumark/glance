@@ -147,7 +147,16 @@ choices and never opens a browser. Run it from an elevated prompt.
 | `/TASKS="startmenu,desktopicon"` | Selects exactly these tasks; every task not listed is off. |
 | `/MERGETASKS="desktopicon"` | Adds to or removes from (with `!`) the default tasks, e.g. `/MERGETASKS="desktopicon"` also creates the desktop shortcut. |
 
-Tasks: `startmenu` (Start-menu shortcut, on by default) and `desktopicon` (desktop shortcut, off by default).
+Tasks: `pawnio` (download and install the PawnIO driver, on by default; not offered when PawnIO is already
+installed), `startmenu` (Start-menu shortcut, on by default) and `desktopicon` (desktop shortcut, off by default).
+To skip PawnIO use `/MERGETASKS="!pawnio"`. `/TASKS="!pawnio"` also skips it, but turns off every other task too,
+so no Start-menu shortcut is created.
+
+PawnIO is downloaded during setup from its [official release](https://github.com/namazso/PawnIO.Setup/releases)
+(a pinned version, checked against a pinned SHA-256; a file with another hash is never run) and needs internet
+access. Offline, or if the download or PawnIO's own setup fails, Glance still installs and exits `0`: the setup log
+(and, in the wizard, the Finish page) says CPU and motherboard sensors are unavailable until PawnIO is installed from
+<https://pawnio.eu/>. Uninstalling Glance never removes PawnIO.
 
 Exit codes:
 
