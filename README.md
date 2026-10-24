@@ -132,6 +132,35 @@ The install folder must be inside `C:\Program Files`. The service runs as SYSTEM
 `C:\Glance`) can be writable by ordinary users. The wizard refuses any other folder, and a silent install with
 `/DIR=` pointing elsewhere aborts with a non-zero exit code.
 
+### Silent install
+
+`Glance-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG=C:\Temp\glance-setup.log` installs with the default
+choices and never opens a browser. Run it from an elevated prompt.
+
+| Switch | Effect |
+|---|---|
+| `/VERYSILENT` | No wizard and no progress window. |
+| `/SILENT` | No wizard; shows the progress window only. |
+| `/SUPPRESSMSGBOXES` | Answers message boxes with their default. Use with either of the above. |
+| `/LOG=<file>` | Writes the setup log to `<file>`. Without it the log still goes to `%TEMP%\Setup Log <date> #<n>.txt`. |
+| `/DIR=<folder>` | Install folder. Must be inside `C:\Program Files`, otherwise setup stops with exit code 7. |
+| `/TASKS="startmenu,desktopicon"` | Selects exactly these tasks; every task not listed is off. |
+| `/MERGETASKS="desktopicon"` | Adds to or removes from (with `!`) the default tasks, e.g. `/MERGETASKS="desktopicon"` also creates the desktop shortcut. |
+
+Tasks: `startmenu` (Start-menu shortcut, on by default) and `desktopicon` (desktop shortcut, off by default).
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Installed; the service is running and answered. |
+| `10` | Files installed, but the service could not be registered or did not answer within 30 s. See the setup log and `%ProgramData%\Glance\logs`. Nothing is rolled back. |
+| `7` | Setup stopped before installing (for example `/DIR=` outside Program Files, or the running service did not stop for an upgrade). |
+| other | Inno Setup's own codes (`1` setup could not start, `2`/`5` cancelled, `3`/`4` fatal error). See the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes). |
+
+A silent uninstall is `"C:\Program Files\Glance\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES`. It keeps
+`%ProgramData%\Glance`.
+
 ## Project layout
 
 | Path | What it is |
