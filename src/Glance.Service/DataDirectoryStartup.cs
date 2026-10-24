@@ -1,4 +1,5 @@
 using Glance.Core.Layouts;
+using Glance.Core.Notices;
 using Glance.Platform.Windows;
 using Serilog;
 
@@ -23,6 +24,18 @@ public static class DataDirectoryStartup
             LogFailure(paths, ex);
             throw;
         }
+    }
+
+    /// <summary>
+    /// After a quarantine, tells the user where their old files went and that settings were reset. The notice id is
+    /// the quarantine folder's name, so dismissing it hides it for good while a later quarantine shows again.
+    /// </summary>
+    public static void AddQuarantineNotice(NoticeBoard board, DataDirectoryAcl.AclResult? result)
+    {
+        if (result is not { Outcome: DataDirectoryAcl.Outcome.Quarantined, QuarantineDir: { } folder }) return;
+        board.Add(new Notice(Path.GetFileName(folder), "warning",
+            $"Glance found files in its data folder it couldn't trust and moved them to {folder}. " +
+            "Settings were reset; set your password again if you use network access."));
     }
 
     private static void LogFailure(GlancePaths paths, Exception failure)

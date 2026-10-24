@@ -80,6 +80,7 @@ if (settings.LoadError is not null)
         settings.Repairs.Count > 0
             ? $"Some settings were invalid and were reset: {settings.LoadError}. The original file is settings.json.corrupt."
             : $"settings.json could not be read ({settings.LoadError}), so all settings were reset to defaults. The original file is settings.json.corrupt."));
+DataDirectoryStartup.AddQuarantineNotice(app.Services.GetRequiredService<NoticeBoard>(), dataDirAcl);
 foreach (var warning in markerWarnings)
     app.Logger.LogWarning("{Warning}", warning);
 foreach (var action in dataDirAcl?.Actions ?? [])

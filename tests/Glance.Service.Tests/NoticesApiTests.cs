@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using Glance.Core.Layouts;
 using Glance.Core.Notices;
+using Glance.Platform.Windows;
+using Glance.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Glance.Service.Tests;
@@ -74,6 +76,38 @@ public class NoticesApiTests
         var text = n.GetProperty("text").GetString();
         Assert.Contains("all settings were reset to defaults", text);
         Assert.Contains("settings.json.corrupt", text);
+    }
+
+    [Fact]
+    public async Task Quarantine_raises_notice()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        var folder = Path.Combine(f.DataDir, "quarantine-20261024T101010Z");
+        var result = new DataDirectoryAcl.AclResult(DataDirectoryAcl.Outcome.Quarantined, folder, []);
+
+        DataDirectoryStartup.AddQuarantineNotice(f.Services.GetRequiredService<NoticeBoard>(), result);
+
+        var n = Assert.Single((await c.GetFromJsonAsync<JsonElement>("/api/notices")).EnumerateArray());
+        Assert.Equal("quarantine-20261024T101010Z", n.GetProperty("id").GetString());
+        Assert.Equal("warning", n.GetProperty("severity").GetString());
+        Assert.Equal($"Glance found files in its data folder it couldn't trust and moved them to {folder}. " +
+            "Settings were reset; set your password again if you use network access.", n.GetProperty("text").GetString());
+
+        // Dismissed, it stays hidden after a restart: the id is the same for the same quarantine.
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/api/notices/quarantine-20261024T101010Z/dismiss", null)).StatusCode);
+        var board = new NoticeBoard(new SettingsStore(new GlancePaths(f.DataDir)));
+        DataDirectoryStartup.AddQuarantineNotice(board, result);
+        Assert.Empty(board.Active);
+    }
+
+    [Fact]
+    public void No_quarantine_no_notice()
+    {
+        using var dir = new TempDir();
+        var board = new NoticeBoard(new SettingsStore(new GlancePaths(dir.Path)));
+        DataDirectoryStartup.AddQuarantineNotice(board, null);   // not enforced (GLANCE_DATA, unelevated)
+        DataDirectoryStartup.AddQuarantineNotice(board, new DataDirectoryAcl.AclResult(DataDirectoryAcl.Outcome.Tightened, null, []));
+        Assert.Empty(board.Active);
     }
 
     [Fact]
