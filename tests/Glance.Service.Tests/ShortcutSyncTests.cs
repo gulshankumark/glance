@@ -74,4 +74,20 @@ public class ShortcutSyncTests
         store.Update(s => s.Port = 9300);
         Assert.Equal("http://localhost:8735/", Url(sc));
     }
+
+    [Fact]
+    public async Task Sync_rewrites_when_binding_leaves_fallback()
+    {
+        var (dir, store, sc) = Arrange();
+        using var _ = dir;
+        var binding = new WebBindingState(StartupBinding.LoopbackFallback);
+        using var sync = new ShortcutSync(store, binding, [sc], NullLogger<ShortcutSync>.Instance);
+        await sync.StartAsync(default);
+        Assert.Equal("http://localhost:8735/", Url(sc));
+
+        store.Update(s => { s.Port = 9000; s.NetworkAccess = true; s.Https = true; s.PasswordHash = "x"; });
+        binding.Mode = StartupBinding.Configured;
+
+        Assert.Equal("https://localhost:9000/", Url(sc));
+    }
 }

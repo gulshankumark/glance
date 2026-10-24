@@ -20,7 +20,20 @@ public enum StartupBinding
 /// <summary>How the running service is bound; becomes <see cref="StartupBinding.Configured"/> after a successful network change.</summary>
 public sealed class WebBindingState(StartupBinding mode)
 {
-    public StartupBinding Mode { get; set; } = mode;
+    private int _mode = (int)mode;
+
+    /// <summary>Raised after <see cref="Mode"/> changes value.</summary>
+    public event Action? Changed;
+
+    public StartupBinding Mode
+    {
+        get => (StartupBinding)Volatile.Read(ref _mode);
+        set
+        {
+            if (Interlocked.Exchange(ref _mode, (int)value) == (int)value) return;
+            try { Changed?.Invoke(); } catch { /* subscriber faults must not break callers */ }
+        }
+    }
 }
 
 /// <summary>

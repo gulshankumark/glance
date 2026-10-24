@@ -12,14 +12,14 @@ public sealed class ShortcutSync(SettingsStore settings, WebBindingState binding
     : IHostedService, IDisposable
 {
     private readonly object _gate = new();
-    private (int Port, bool Https, bool NetworkAccess)? _last;
+    private (int Port, bool Https, bool NetworkAccess, StartupBinding Mode)? _last;
     private bool _subscribed;
 
     public Task StartAsync(CancellationToken ct)
     {
         lock (_gate)
         {
-            if (!_subscribed) { settings.Changed += OnChanged; _subscribed = true; }
+            if (!_subscribed) { settings.Changed += OnChanged; binding.Changed += OnChanged; _subscribed = true; }
         }
         Sync();
         return Task.CompletedTask;
@@ -33,7 +33,7 @@ public sealed class ShortcutSync(SettingsStore settings, WebBindingState binding
     {
         lock (_gate)
         {
-            if (_subscribed) { settings.Changed -= OnChanged; _subscribed = false; }
+            if (_subscribed) { settings.Changed -= OnChanged; binding.Changed -= OnChanged; _subscribed = false; }
         }
     }
 
@@ -44,12 +44,13 @@ public sealed class ShortcutSync(SettingsStore settings, WebBindingState binding
         lock (_gate)
         {
             var s = settings.Current;
-            var key = (s.Port, s.Https, s.NetworkAccess);
+            var key = (s.Port, s.Https, s.NetworkAccess, binding.Mode);
             if (_last == key) return;
             try
             {
                 UrlShortcuts.RewriteExisting(paths, ServiceAddress.LocalUrl(s, binding.Mode),
                     (p, why) => log.LogWarning("Shortcut {Path} was not updated: {Reason}", p, why));
+                // Skipped/failed writes are retried only on the next relevant change or restart: shortcuts are best-effort.
                 _last = key;
             }
             catch (Exception e)
