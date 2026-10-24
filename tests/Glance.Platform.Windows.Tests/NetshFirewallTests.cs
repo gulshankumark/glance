@@ -33,4 +33,21 @@ public class NetshFirewallTests
     [InlineData(1, 0, false)]  // delete failed, rule still there
     public void Delete_succeeded_uses_exit_codes_only(int del, int show, bool ok) =>
         Assert.Equal(ok, NetshFirewall.DeleteSucceeded(del, show));
+
+    [Fact]
+    public void Run_times_out_on_a_hung_process()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Throws<TimeoutException>(() =>
+            NetshFirewall.Run("ping.exe", ["-n", "30", "127.0.0.1"], TimeSpan.FromSeconds(1)));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void Run_returns_exit_code_and_output()
+    {
+        var (code, output) = NetshFirewall.Run("cmd.exe", ["/c", "echo hi"], TimeSpan.FromSeconds(10));
+        Assert.Equal(0, code);
+        Assert.Contains("hi", output);
+    }
 }

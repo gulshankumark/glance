@@ -52,23 +52,33 @@ public sealed class NetshFirewall : IFirewall
         return null;
     }
 
-    private static (int Code, string Output) Netsh(params string[] args)
+    private static (int Code, string Output) Netsh(params string[] args) =>
+        Run("netsh.exe", ["advfirewall", "firewall", .. args], TimeSpan.FromSeconds(30));
+
+    /// <summary>
+    /// Runs a process without a shell and returns its exit code and combined output. Output is read asynchronously, so a
+    /// hung process (or one whose grandchild holds the pipe) cannot block past <paramref name="timeout"/>: on timeout
+    /// the process tree is killed and <see cref="TimeoutException"/> thrown.
+    /// </summary>
+    public static (int Code, string Output) Run(string fileName, IEnumerable<string> args, TimeSpan timeout)
     {
-        var psi = new ProcessStartInfo("netsh.exe")
+        var psi = new ProcessStartInfo(fileName)
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
         };
-        psi.ArgumentList.Add("advfirewall");
-        psi.ArgumentList.Add("firewall");
         foreach (var a in args) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("netsh could not be started");
-        var err = p.StandardError.ReadToEndAsync();
-        var outp = p.StandardOutput.ReadToEnd();
-        if (!p.WaitForExit(30_000))
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{fileName} could not be started");
+        var outTask = p.StandardOutput.ReadToEndAsync();
+        var errTask = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(timeout))
         {
             try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-            throw new TimeoutException("netsh did not finish within 30 seconds");
+            throw new TimeoutException($"{fileName} did not finish within {timeout.TotalSeconds:0.#} seconds");
         }
-        return (p.ExitCode, outp + err.GetAwaiter().GetResult());
+        p.WaitForExit(); // flushes the async output readers
+        // A grandchild may still hold a pipe open; never wait for it forever.
+        Task.WaitAll([outTask, errTask], 5_000);
+        var text = (outTask.IsCompletedSuccessfully ? outTask.Result : "") + (errTask.IsCompletedSuccessfully ? errTask.Result : "");
+        return (p.ExitCode, text);
     }
 }
