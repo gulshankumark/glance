@@ -18,8 +18,11 @@ Glance is licensed under GPL-3.0. Each NuGet dependency added to the project is 
 | Microsoft.Extensions.Hosting.WindowsServices 8.0.1 | Glance.Service (Windows service host) | MIT |
 | Microsoft.AspNetCore.Mvc.Testing 8.0.11 | Glance.Service.Tests | MIT |
 | Inter 4.1 (Inter-Regular.ttf, Inter-Bold.ttf, embedded font resources) | Glance.Core (default font) | SIL OFL-1.1 |
+| JetBrains Mono 2.304 (JetBrainsMono-Regular.ttf, JetBrainsMono-Bold.ttf, embedded font resources) | Glance.Core (monospace font) | SIL OFL-1.1 |
 
 Inter font: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter), licensed under the SIL Open Font License 1.1 (https://openfontlicense.org).
+
+JetBrains Mono font: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), licensed under the SIL Open Font License 1.1 (https://openfontlicense.org).
 
 ## Web UI npm packages
 

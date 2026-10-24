@@ -11,12 +11,17 @@ public sealed class FontProvider
     private readonly Lazy<SKTypeface> _regular = new(() => LoadEmbedded("Inter-Regular.ttf"));
     private readonly Lazy<SKTypeface> _bold = new(() => LoadEmbedded("Inter-Bold.ttf"));
 
-    /// <summary>Bundled Inter by default; a named system family when installed; Inter when it is not.</summary>
+    /// <summary>Bundled Inter by default; the bundled JetBrains Mono by name, whatever is installed; a named system family when installed; Inter when it is not.</summary>
     public SKTypeface Get(FontSpec? spec)
     {
         var f = LayoutLimits.SafeFont(spec);
         return _cache.GetOrAdd((f.Family.ToLowerInvariant(), f.Weight), _ => Resolve(f));
     }
+
+    private readonly Lazy<SKTypeface> _monoRegular = new(() => LoadEmbedded("JetBrainsMono-Regular.ttf"));
+    private readonly Lazy<SKTypeface> _monoBold = new(() => LoadEmbedded("JetBrainsMono-Bold.ttf"));
+
+    public const string MonoFamily = "JetBrains Mono";
 
     private SKTypeface Inter(int weight) => weight >= 600 ? _bold.Value : _regular.Value;
 
@@ -24,6 +29,8 @@ public sealed class FontProvider
     {
         if (string.IsNullOrWhiteSpace(f.Family) || f.Family.Equals("Inter", StringComparison.OrdinalIgnoreCase))
             return Inter(f.Weight);
+        if (f.Family.Equals(MonoFamily, StringComparison.OrdinalIgnoreCase))
+            return f.Weight >= 600 ? _monoBold.Value : _monoRegular.Value;
         var style = new SKFontStyle(f.Weight, (int)SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
         return SKFontManager.Default.MatchFamily(f.Family, style) ?? Inter(f.Weight);
     }
