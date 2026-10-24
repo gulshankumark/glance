@@ -74,12 +74,12 @@ public static partial class DataDirectoryAcl
 
     /// <summary>
     /// Makes <paramref name="root"/> hardened (see <see cref="Hardened"/>). When it was not already, everything inside
-    /// is reset too: owned by Administrators, explicit entries dropped so only the root's are inherited, and links
-    /// (reparse points) removed without following them, since any local user could have planted them before.
+    /// is reset too: owned by Administrators and explicit entries dropped so only the root's are inherited, since any
+    /// local user could have planted them before.
     /// When the root already is hardened, its contents are walked without following links: every entry owned by someone
-    /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened); links are
-    /// only reported in the actions and do not change the outcome. Either way a hard link (a file with more than one
-    /// name) is deleted, never re-permissioned: that would change a file outside the data directory.
+    /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened).
+    /// Either way links are deleted, never followed or re-permissioned (see <see cref="RemoveIfLink"/>); a deletion
+    /// makes the result Tightened.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
     public static AclResult Enforce(string root)
@@ -124,19 +124,13 @@ public static partial class DataDirectoryAcl
 
     /// <summary>
     /// Walks without following links; resets only the entries that need it (including ones whose descriptor cannot be
-    /// read: a planted DACL can deny even SYSTEM). Links are left to the link handling and never count as a change.
+    /// read: a planted DACL can deny even SYSTEM). Links are deleted first and count as a change.
     /// </summary>
     private static void ResetUntrustedChildren(DirectoryInfo dir, string relative, List<string> actions, ref bool changed)
     {
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
             var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
-            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                // Reading or writing a link's ACL through .NET would act on its target, so it is not touched here.
-                actions.Add($"{rel}: link left alone (not followed)");
-                continue;
-            }
             if (RemoveIfLink(entry, rel, actions, ref changed)) continue;
             if (entry is DirectoryInfo sub)
             {
@@ -163,19 +157,29 @@ public static partial class DataDirectoryAcl
     }
 
     /// <summary>
-    /// Deletes <paramref name="entry"/> when it is a hard link (a file with more than one name): re-permissioning or
-    /// re-owning it would change a file that may live outside the data directory. Read and deleted through one handle
-    /// that never follows a link. True when the caller must skip the entry (deleted, or gone already).
+    /// Deletes <paramref name="entry"/> when it is a symbolic link or junction, or a hard link (a file with more than
+    /// one name): following the one or re-permissioning the other would change something outside the data directory.
+    /// Any other reparse point (a compressed or cloud placeholder file, say) is not followed, not recursed into and
+    /// left alone: .NET reads and writes ACLs by name, which cannot be guaranteed not to reach through it. Every entry
+    /// is read, and deleted, through one handle that never follows a link, whatever the enumeration reported.
+    /// True when the caller must skip the entry (deleted, left alone, or gone already).
     /// </summary>
     internal static bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed)
     {
-        if (entry is not FileInfo) return false;   // a directory has exactly one name
-        var info = FileLinks.DeleteIf(entry.FullName, i => i.IsHardLink);
-        if (info is null) return true;
-        if (!info.Value.IsHardLink) return false;
-        actions.Add($"{rel}: hard link deleted");
-        changed = true;
-        return true;
+        var info = FileLinks.DeleteIf(entry.FullName, i => i.IsNameLink || i.IsHardLink);
+        if (info is not { } i) return true;
+        if (i.IsNameLink || i.IsHardLink)
+        {
+            actions.Add(i.IsNameLink ? $"{rel}: link deleted" : $"{rel}: hard link deleted");
+            changed = true;
+            return true;
+        }
+        if (i.ReparseTag is { } tag)
+        {
+            actions.Add($"{rel}: reparse point (tag 0x{tag:X8}) left alone (not followed)");
+            return true;
+        }
+        return false;
     }
 
     private static string? ReasonFor(Func<FileSystemSecurity> read)
@@ -191,12 +195,6 @@ public static partial class DataDirectoryAcl
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
             var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
-            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                if (entry is DirectoryInfo link) link.Delete(recursive: false);   // removes the link, not its target
-                else entry.Delete();
-                continue;
-            }
             if (RemoveIfLink(entry, rel, actions, ref removed)) continue;
             if (entry is DirectoryInfo sub)
             {

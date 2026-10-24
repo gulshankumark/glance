@@ -153,6 +153,78 @@ public class DataDirectoryAclTests
     }
 
     [Fact]
+    public void Junction_to_outside_dir_is_removed_target_untouched()
+    {
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var target = Directory.CreateDirectory(Path.Combine(dir.Path, "Windows")).FullName;   // stands in for C:\Windows
+        File.WriteAllText(Path.Combine(target, "system.ini"), "keep");
+        var before = LinkFixtures.Sddl(target);
+        var fileBefore = LinkFixtures.Sddl(Path.Combine(target, "system.ini"));
+        var junction = Path.Combine(root, "logs");
+        LinkFixtures.Junction(junction, target);
+        var actions = new List<string>();
+        var changed = false;
+
+        Assert.True(DataDirectoryAcl.RemoveIfLink(new DirectoryInfo(junction), "logs", actions, ref changed));
+
+        Assert.True(changed);
+        Assert.False(Directory.Exists(junction));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(target, "system.ini")));
+        Assert.Equal(before, LinkFixtures.Sddl(target));
+        Assert.Equal(fileBefore, LinkFixtures.Sddl(Path.Combine(target, "system.ini")));
+        Assert.Contains("logs: link deleted", actions);
+    }
+
+    [Fact]
+    public void Symlink_is_removed()
+    {
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var targetDir = Directory.CreateDirectory(Path.Combine(dir.Path, "elsewhere")).FullName;
+        var targetFile = Path.Combine(targetDir, "a.txt");
+        File.WriteAllText(targetFile, "keep");
+        var dirLink = Path.Combine(root, "layouts");
+        var fileLink = Path.Combine(root, "settings.json");
+        if (!LinkFixtures.TrySymlink(dirLink, targetDir, directory: true) || !LinkFixtures.TrySymlink(fileLink, targetFile, directory: false))
+            return;   // symlinks need SeCreateSymbolicLinkPrivilege or Developer Mode; the elevated run covers them
+        var actions = new List<string>();
+        var changed = false;
+
+        Assert.True(DataDirectoryAcl.RemoveIfLink(new DirectoryInfo(dirLink), "layouts", actions, ref changed));
+        Assert.True(DataDirectoryAcl.RemoveIfLink(new FileInfo(fileLink), "settings.json", actions, ref changed));
+
+        Assert.True(changed);
+        Assert.False(Directory.Exists(dirLink));
+        Assert.False(File.Exists(fileLink));
+        Assert.Equal("keep", File.ReadAllText(targetFile));
+        Assert.Equal(new[] { "layouts: link deleted", "settings.json: link deleted" }, actions);
+    }
+
+    [Fact]
+    public void Only_symlink_and_mount_point_tags_count_as_links()
+    {
+        Assert.True(new FileLinks.Info(1, FileLinks.IO_REPARSE_TAG_SYMLINK).IsNameLink);
+        Assert.True(new FileLinks.Info(1, FileLinks.IO_REPARSE_TAG_MOUNT_POINT).IsNameLink);
+        Assert.False(new FileLinks.Info(1, 0x80000017).IsNameLink);   // IO_REPARSE_TAG_WOF: a compressed ordinary file
+        Assert.False(new FileLinks.Info(1, 0x9000301A).IsNameLink);   // a cloud-files placeholder
+        Assert.False(new FileLinks.Info(1, null).IsNameLink);
+    }
+
+    [Fact]
+    public void An_ordinary_directory_is_not_a_link()
+    {
+        using var dir = new TempDir();
+        var sub = Directory.CreateDirectory(Path.Combine(dir.Path, "layouts"));
+        var actions = new List<string>();
+        var changed = false;
+        Assert.False(DataDirectoryAcl.RemoveIfLink(sub, "layouts", actions, ref changed));
+        Assert.False(changed);
+        Assert.Empty(actions);
+        Assert.True(sub.Exists);
+    }
+
+    [Fact]
     public void An_ordinary_file_is_not_a_link()
     {
         using var dir = new TempDir();
@@ -264,7 +336,7 @@ public class DataDirectoryAclTests
     }
 
     [Fact, Trait("Category", "Hardware")]
-    public void Hardened_root_with_only_a_link_is_AlreadySecure_and_leaves_link_and_target_alone()
+    public void Hardened_root_with_only_a_link_is_Tightened_deletes_link_and_leaves_target_alone()
     {
         string? target = null;
         string? link = null;
@@ -278,9 +350,10 @@ public class DataDirectoryAclTests
         }, out _, out var dir);
         using (dir)
         {
-            Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
-            Assert.Contains(result.Actions, a => a.Contains("logs"));
-            Assert.True(Directory.Exists(link));
+            Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
+            Assert.Contains("logs: link deleted", result.Actions);
+            Assert.False(Directory.Exists(link));
+            Assert.True(Directory.Exists(target));
             Assert.Equal(before, new DirectoryInfo(target!).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.All));
         }
     }
