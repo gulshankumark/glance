@@ -78,7 +78,8 @@ public static partial class DataDirectoryAcl
     /// (reparse points) removed without following them, since any local user could have planted them before.
     /// When the root already is hardened, its contents are walked without following links: every entry owned by someone
     /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened); links are
-    /// only reported in the actions and do not change the outcome.
+    /// only reported in the actions and do not change the outcome. Either way a hard link (a file with more than one
+    /// name) is deleted, never re-permissioned: that would change a file outside the data directory.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
     public static AclResult Enforce(string root)
@@ -101,7 +102,8 @@ public static partial class DataDirectoryAcl
         Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");   // to set an owner on objects we cannot open otherwise
         dir.SetAccessControl(OwnerOnly<DirectorySecurity>());   // owner first: the old DACL may not let us write a new one
         dir.SetAccessControl(Hardened());
-        ResetChildren(dir);
+        var removed = false;
+        ResetChildren(dir, "", actions, ref removed);
         actions.Add("reset the data directory and everything inside it");
         return new AclResult(ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken, null, actions);
     }
@@ -135,6 +137,7 @@ public static partial class DataDirectoryAcl
                 actions.Add($"{rel}: link left alone (not followed)");
                 continue;
             }
+            if (RemoveIfLink(entry, rel, actions, ref changed)) continue;
             if (entry is DirectoryInfo sub)
             {
                 var reason = ReasonFor(() => sub.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
@@ -159,6 +162,22 @@ public static partial class DataDirectoryAcl
         }
     }
 
+    /// <summary>
+    /// Deletes <paramref name="entry"/> when it is a hard link (a file with more than one name): re-permissioning or
+    /// re-owning it would change a file that may live outside the data directory. Read and deleted through one handle
+    /// that never follows a link. True when the caller must skip the entry (deleted, or gone already).
+    /// </summary>
+    internal static bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed)
+    {
+        if (entry is not FileInfo) return false;   // a directory has exactly one name
+        var info = FileLinks.DeleteIf(entry.FullName, i => i.IsHardLink);
+        if (info is null) return true;
+        if (!info.Value.IsHardLink) return false;
+        actions.Add($"{rel}: hard link deleted");
+        changed = true;
+        return true;
+    }
+
     private static string? ReasonFor(Func<FileSystemSecurity> read)
     {
         try { return ResetReason(read()); }
@@ -167,21 +186,23 @@ public static partial class DataDirectoryAcl
 
     private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);
 
-    private static void ResetChildren(DirectoryInfo dir)
+    private static void ResetChildren(DirectoryInfo dir, string relative, List<string> actions, ref bool removed)
     {
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
+            var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
             {
                 if (entry is DirectoryInfo link) link.Delete(recursive: false);   // removes the link, not its target
                 else entry.Delete();
                 continue;
             }
+            if (RemoveIfLink(entry, rel, actions, ref removed)) continue;
             if (entry is DirectoryInfo sub)
             {
                 sub.SetAccessControl(OwnerOnly<DirectorySecurity>());
                 sub.SetAccessControl(InheritOnly<DirectorySecurity>());
-                ResetChildren(sub);
+                ResetChildren(sub, rel, actions, ref removed);
             }
             else if (entry is FileInfo file)
             {
