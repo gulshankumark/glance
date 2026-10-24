@@ -19,8 +19,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var paths = GlancePaths.Default();
 // Before anything is read from or written to it (settings, keys, logs): only SYSTEM and Administrators may use it.
-var dataDirAcl = DataDirectoryAcl.ShouldEnforce(GlancePaths.IsOverridden, DataDirectoryAcl.IsElevated())
-    ? DataDirectoryAcl.Enforce(paths.Root) : (DataDirectoryAcl.AclResult?)null;
+var dataDirAcl = DataDirectoryStartup.Enforce(paths,
+    DataDirectoryAcl.ShouldEnforce(GlancePaths.IsOverridden, DataDirectoryAcl.IsElevated()), DataDirectoryAcl.Enforce);
 var settings = new SettingsStore(paths);
 // kestrel.json is rebuilt from settings at every start; a port that cannot be bound must not take the screens down.
 var binding = NetworkConfig.ApplyAtStartup(paths, settings, NetworkConfig.CanBind);

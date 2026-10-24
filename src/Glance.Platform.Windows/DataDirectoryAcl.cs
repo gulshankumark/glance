@@ -113,6 +113,25 @@ public static partial class DataDirectoryAcl
     }
 
     /// <summary>
+    /// True when writing to files in <paramref name="dir"/> cannot reach outside it through a link: the directory is
+    /// no reparse point and holds no reparse points or hard links. False as well when that cannot be read.
+    /// </summary>
+    public static bool IsLinkFree(string dir)
+    {
+        try
+        {
+            if (FileLinks.Read(dir).ReparseTag is not null) return false;
+            foreach (var entry in Directory.EnumerateFileSystemEntries(dir, "*", new EnumerationOptions { AttributesToSkip = 0 }))
+            {
+                var info = FileLinks.Read(entry);
+                if (info.ReparseTag is not null || info.IsHardLink) return false;
+            }
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>
     /// True when an entry must be reset: not owned by SYSTEM/Administrators, or carrying an explicit (non-inherited)
     /// access rule. Pure: reads the descriptor only.
     /// </summary>
