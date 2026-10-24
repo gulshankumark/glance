@@ -10,7 +10,10 @@ namespace Glance.Platform.Windows;
 /// </summary>
 public interface ITakeoverMarker
 {
-    /// <summary>The quarantine folder name of an unfinished takeover, or null when none is pending.</summary>
+    /// <summary>
+    /// The quarantine folder name of an unfinished takeover, or null when none is pending. Throws when the marker
+    /// cannot be read at all, so a takeover is never forgotten over a transient error.
+    /// </summary>
     string? Read();
 
     /// <summary>Records that a takeover into <paramref name="quarantineDirName"/> has begun.</summary>
@@ -30,6 +33,9 @@ public interface ITakeoverMarker
 /// never what a link points to), reported through <paramref name="warn"/> and read as nothing pending. A user can
 /// neither edit nor delete the trusted file (its DACL denies them, and Users may not delete others' files in
 /// %ProgramData%), so a user can neither forge a resume nor cancel one.</para>
+/// <para>Only a file that positively fails one of those checks is deleted. One that cannot be opened or read (a sharing
+/// violation from a scanner at boot, say) is left alone and the read throws, so startup stops and the next start
+/// resumes the takeover instead of forgetting it.</para>
 /// Every read and ACL write goes through a handle opened on the entry itself, never by name.
 /// </summary>
 public sealed class FileTakeoverMarker(string directory, Action<string>? warn = null) : ITakeoverMarker
@@ -50,14 +56,12 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
     {
         // To open the file whatever a planted DACL says.
         DataDirectoryAcl.Privileges.Enable("SeBackupPrivilege", "SeRestorePrivilege");
-        string? reason, content = null;
-        try
+        string? reason, content;
+        using (var entry = FileLinks.OpenToRead(Path))   // a read error propagates: the marker may well be genuine
         {
-            using var entry = FileLinks.OpenToRead(Path);
             if (entry is null) return null;
             reason = Untrusted(entry, out content);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { reason = $"it could not be read ({e.Message})"; }
         if (reason is null) return content;
 
         try
@@ -113,7 +117,7 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
         content = null;
         if (entry.Info.ReparseTag is { } tag) return $"it is a link or another reparse point (tag 0x{tag:X8})";
         if (entry.Info.IsHardLink) return "it has more than one name (a hard link)";
-        if (entry.ReadDescriptor() is not { } bytes) return "its permissions could not be read";
+        if (entry.ReadDescriptor() is not { } bytes) throw new IOException("The permissions of the takeover marker could not be read.");
         var sd = new RawSecurityDescriptor(bytes, 0);
         if (!DataDirectoryAcl.IsTrustedOwner(sd.Owner)) return $"it is owned by {sd.Owner?.Value ?? "no one"}, not SYSTEM or Administrators";
         if (sd.DiscretionaryAcl is null) return "it has no DACL, so everyone has full access";

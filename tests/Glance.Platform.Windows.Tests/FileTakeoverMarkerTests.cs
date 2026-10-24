@@ -51,6 +51,23 @@ public class FileTakeoverMarkerTests
         Assert.Contains("owned by", Assert.Single(warnings));
     }
 
+    [Fact]   // runs unelevated too: a sharing violation needs no privilege
+    public void A_marker_that_cannot_be_read_is_kept_and_the_read_throws()
+    {
+        using var dir = new TempDir();
+        var warnings = new List<string>();
+        var marker = new FileTakeoverMarker(dir.Path, warnings.Add);
+        File.WriteAllText(marker.Path, Name);
+        using (new FileStream(marker.Path, FileMode.Open, FileAccess.Read, FileShare.None))   // e.g. AV scanning at boot
+        {
+            Assert.ThrowsAny<IOException>(() => marker.Read());
+        }
+
+        Assert.True(File.Exists(marker.Path));   // a genuine marker survives a transient error
+        Assert.Equal(Name, File.ReadAllText(marker.Path));
+        Assert.Empty(warnings);
+    }
+
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
     public void File_marker_round_trips_with_hardened_acl()
     {
