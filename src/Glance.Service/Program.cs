@@ -1,6 +1,7 @@
 using Glance.Core.Devices;
 using Glance.Core.Layouts;
 using Glance.Core.Media;
+using Glance.Core.Notices;
 using Glance.Core.Rendering;
 using Glance.Core.Sensors;
 using Glance.Core.Sessions;
@@ -37,6 +38,7 @@ s.ConfigureHttpJsonOptions(o => ApiJson.Configure(o.SerializerOptions));
 s.AddSingleton(paths);
 s.AddSingleton(TimeProvider.System);
 s.AddSingleton(settings);
+s.AddSingleton<NoticeBoard>();
 s.AddSingleton(new WebBindingState(binding));
 s.AddSingleton<LayoutStore>();
 s.AddSingleton<AssetStore>();
@@ -67,6 +69,10 @@ s.AddHostedService<CoreRunner>();
 s.AddGlanceSecurity(paths);
 
 var app = builder.Build();
+if (settings.Repairs.Count > 0)
+    app.Services.GetRequiredService<NoticeBoard>().Add(new Notice(
+        $"settings-repaired-{DateTime.UtcNow:yyyyMMddHHmmss}", "warning",
+        $"Some settings were invalid and were reset: {settings.LoadError}. The original file is settings.json.corrupt."));
 if (dataDirAcl == DataDirectoryAcl.Outcome.OwnershipTaken)
     app.Logger.LogWarning("The data directory {Root} was owned by another account; ownership was taken and its permissions reset to SYSTEM and Administrators only", paths.Root);
 else if (dataDirAcl == DataDirectoryAcl.Outcome.Tightened)
@@ -103,6 +109,7 @@ app.MapSettingsApi();
 app.MapAssetsApi();
 app.MapPreviewApi();
 app.MapUiSupportApi();
+app.MapNoticesApi();
 app.MapEventsApi();
 app.MapLogsApi();
 app.Run();

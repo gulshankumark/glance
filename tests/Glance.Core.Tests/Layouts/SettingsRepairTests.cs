@@ -94,4 +94,13 @@ public class SettingsRepairTests
     [InlineData("{ \"port\": ")]
     public void Non_object_text_throws_JsonException(string json) =>
         Assert.ThrowsAny<System.Text.Json.JsonException>(() => SettingsRepair.Load(json));
+
+    [Fact]
+    public void Dismissed_notices_survive_a_repair_of_another_field()
+    {
+        var (s, r) = SettingsRepair.Load("""{"port":"abc","dismissedNotices":["a","b"]}""");
+        Assert.Equal(["a", "b"], s.DismissedNotices);
+        Assert.Contains(r, x => x.StartsWith("port"));
+        Assert.Empty(SettingsRepair.Load("{}").Item1.DismissedNotices);
+    }
 }

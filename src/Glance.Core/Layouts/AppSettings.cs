@@ -44,14 +44,17 @@ public sealed class AppSettings
     public Dictionary<string, string> Aliases { get; set; } = new();
     public Dictionary<string, string> RolePins { get; set; } = new();
 
+    /// <summary>Ids of notices the person dismissed; they stay hidden after a restart.</summary>
+    public List<string> DismissedNotices { get; set; } = new();
+
     public IReadOnlyList<string> Validate()
     {
         var e = new List<string>();
         if (Port is < 1 or > 65535) e.Add("port must be 1..65535");
         if (MaxOverlayAnimationFps is < 1 or > 60) e.Add("maxOverlayAnimationFps must be 1..60 or null");
-        if (Devices is null || Aliases is null || RolePins is null)
+        if (Devices is null || Aliases is null || RolePins is null || DismissedNotices is null)
         {
-            e.Add("devices, aliases and rolePins must not be null");
+            e.Add("devices, aliases, rolePins and dismissedNotices must not be null");
             return e;
         }
         foreach (var (key, d) in Devices)
