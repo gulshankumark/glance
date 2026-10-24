@@ -134,7 +134,7 @@ The install folder must be inside `C:\Program Files`. The service runs as SYSTEM
 
 ### Silent install
 
-`Glance-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG=C:\Temp\glance-setup.log` installs with the default
+`Glance-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=C:\Temp\glance-setup.log` installs with the default
 choices and never opens a browser. Run it from an elevated prompt.
 
 If TRCC is running, the wizard asks you to close it and offers to remove its logon task (`TRCCAppStartup`); it
@@ -146,8 +146,9 @@ alone; Glance cannot drive the screen until TRCC is closed.
 | `/VERYSILENT` | No wizard and no progress window. |
 | `/SILENT` | No wizard; shows the progress window only. |
 | `/SUPPRESSMSGBOXES` | Answers message boxes with their default. Use with either of the above. |
+| `/NORESTART` | Never restart Windows. Without it, a silent install restarts Windows by itself when PawnIO's setup reports that a restart is needed (rare); the wizard asks first. |
 | `/LOG=<file>` | Writes the setup log to `<file>`. Without it the log still goes to `%TEMP%\Setup Log <date> #<n>.txt`. |
-| `/DIR=<folder>` | Install folder. Must be inside `C:\Program Files`, otherwise setup stops with exit code 7. |
+| `/DIR=<folder>` | Install folder. Must be inside `C:\Program Files`, otherwise setup stops without installing and exits with a non-zero code. |
 | `/TASKS="startmenu,desktopicon"` | Selects exactly these tasks; every task not listed is off. |
 | `/MERGETASKS="desktopicon"` | Adds to or removes from (with `!`) the default tasks, e.g. `/MERGETASKS="desktopicon"` also creates the desktop shortcut. |
 
@@ -168,7 +169,7 @@ Exit codes:
 |---|---|
 | `0` | Installed; the service is running and answered. |
 | `10` | Files installed, but the service could not be registered or did not answer within 30 s. See the setup log and `%ProgramData%\Glance\logs`. Nothing is rolled back. |
-| `7` | Setup stopped before installing (for example `/DIR=` outside Program Files, or the running service did not stop for an upgrade). |
+| `7` | Setup stopped before installing because the running Glance service did not stop for an upgrade. |
 | other | Inno Setup's own codes (`1` setup could not start, `2`/`5` cancelled, `3`/`4` fatal error). See the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes). |
 
 A silent uninstall is `"C:\Program Files\Glance\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES`. It keeps

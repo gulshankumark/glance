@@ -26,6 +26,8 @@
 ; on 2026-10-24; it matches the release's GitHub asset digest and the winget manifest namazso.PawnIO 2.2.0.
 ; To update: change the version in the URL, then the hash (lowercase hex of the new PawnIO_setup.exe).
 #define PawnIoUrl "https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe"
+; The #ifndef override exists only for the wrong-hash test (iscc /DPawnIoSha256=...). build.ps1 must
+; never pass it; release builds always use the pinned value below.
 #ifndef PawnIoSha256
   #define PawnIoSha256 "1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
 #endif
@@ -70,7 +72,7 @@ SetupLogging=yes
 
 [Tasks]
 ; Hidden when the PawnIO service already exists (Check), so an upgrade never reinstalls it.
-Name: "pawnio"; Description: "PawnIO driver for CPU and motherboard sensors (downloaded from pawnio.eu)"; GroupDescription: "Drivers:"; Check: PawnIoMissing
+Name: "pawnio"; Description: "PawnIO driver for CPU and motherboard sensors (downloaded from PawnIO's official release)"; GroupDescription: "Drivers:"; Check: PawnIoMissing
 Name: "startmenu"; Description: "Start-menu shortcut"; GroupDescription: "Shortcuts:"
 Name: "desktopicon"; Description: "Desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
@@ -104,6 +106,8 @@ var
   PawnIoDownloadTried, PawnIoDownloaded: Boolean;
   { Download or install of PawnIO failed; the install continues without it. }
   PawnIoFailed: Boolean;
+  { PawnIO's setup exited 3010: installed, Windows must restart to finish (see NeedRestart). }
+  PawnIoNeedsRestart: Boolean;
   { Guided-mode page shown when TRCC is running or starts at logon. }
   TrccPage: TInputOptionWizardPage;
   TrccTaskFound: Boolean;
@@ -358,17 +362,22 @@ begin
       end;
     end;
     PawnIoDownloaded := True;
+    PawnIoFailed := False;
     Log('PawnIO downloaded; SHA-256 matches.');
   except
     PawnIoFailure('download failed: ' + GetExceptionMessage);
   end;
 end;
 
-{ Runs the downloaded PawnIO setup silently. Called before the Glance service starts, so the service
-  sees the driver on its first start. 3010 means installed, restart required. }
+{ Runs the PawnIO setup silently. Called before the Glance service starts, so the service sees the
+  driver on its first start. The download in Setup's temporary folder sits under the user's %TEMP%,
+  which the user's unelevated processes can write, so it is never run from there: it is copied into
+  an admin-only folder under the install folder (inside Program Files), hashed again, and only that
+  copy runs. The copy is deleted afterwards. 3010 means installed, restart required. }
 procedure InstallPawnIo;
 var
   Code: Integer;
+  CopyDir, CopyPath, Hash: String;
 begin
   { The task may have been deselected (Back) after the Ready page downloaded the file. }
   if not WizardIsTaskSelected('pawnio') then
@@ -377,16 +386,43 @@ begin
   if not PawnIoDownloaded then
     Exit;
   WizardForm.StatusLabel.Caption := 'Installing PawnIO...';
-  Code := RunHidden(ExpandConstant('{tmp}\') + PawnIoSetupName, '{#PawnIoArgs}');
-  if ((Code = 0) or (Code = 3010)) and PawnIoInstalled then
+  CopyDir := ExpandConstant('{app}\pawnio-setup');
+  CopyPath := CopyDir + '\' + PawnIoSetupName;
+  { No Exit between creating and deleting the copy, so the clean-up at the end always runs. }
+  if DirExists(CopyDir) then
+    DelTree(CopyDir, True, True, True);
+  Hash := '';
+  if ForceDirectories(CopyDir) and
+     FileCopy(ExpandConstant('{tmp}\') + PawnIoSetupName, CopyPath, False) then
   begin
-    Log('PawnIO installed.');
-    if Code = 3010 then
-      Log('PawnIO setup reports that Windows must restart to finish.');
+    try
+      Hash := GetSHA256OfFile(CopyPath);
+    except
+      Log('Hashing ' + CopyPath + ' failed: ' + GetExceptionMessage);
+    end;
+    if CompareText(Hash, '{#PawnIoSha256}') = 0 then
+    begin
+      Code := RunHidden(CopyPath, '{#PawnIoArgs}');
+      if ((Code = 0) or (Code = 3010)) and PawnIoInstalled then
+      begin
+        Log('PawnIO installed.');
+        if Code = 3010 then
+        begin
+          PawnIoNeedsRestart := True;
+          Log('PawnIO setup reports that Windows must restart to finish.');
+        end;
+      end
+      else
+        PawnIoFailure('setup exited with code ' + IntToStr(Code) + ' and the {#PawnIoService} service ' +
+          'is not present.');
+    end
+    else
+      PawnIoFailure('the copied setup''s SHA-256 (' + Hash + ') does not match the pinned hash; not running it.');
   end
   else
-    PawnIoFailure('setup exited with code ' + IntToStr(Code) + ' and the {#PawnIoService} service ' +
-      'is not present.');
+    PawnIoFailure('could not copy the setup to ' + CopyDir + '.');
+  if DirExists(CopyDir) and not DelTree(CopyDir, True, True, True) then
+    Log('Could not delete ' + CopyDir + '.');
 end;
 
 { tasklist prints one CSV line per matching process, or an INFO line when none matches. }
@@ -458,7 +494,18 @@ begin
         mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end
   else if (CurPageID = wpReady) and not WizardSilent then
+  begin
+    { A failed download is tried again each time the user clicks Install (e.g. after Back). }
+    if not PawnIoDownloaded then
+      PawnIoDownloadTried := False;
     DownloadPawnIo;
+  end;
+end;
+
+{ Lets Setup offer a restart on the Finish page (or restart, without /NORESTART, in silent mode). }
+function NeedRestart: Boolean;
+begin
+  Result := PawnIoNeedsRestart;
 end;
 
 { Guided mode: a PawnIO failure is added to the Finish page text; the run checkbox moves down to fit. }
