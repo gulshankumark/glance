@@ -78,8 +78,8 @@ public static partial class DataDirectoryAcl
     /// local user could have planted them before.
     /// When the root already is hardened, its contents are walked without following links: every entry owned by someone
     /// else, carrying explicit entries or with an unreadable descriptor is reset (the result is then Tightened).
-    /// Either way links are deleted, never followed or re-permissioned (see <see cref="RemoveIfLink"/>); a deletion
-    /// makes the result Tightened.
+    /// Either way links are deleted first, before any DACL changes, and are never followed or re-permissioned (see
+    /// <see cref="RemoveLinks"/>); a deletion makes the result Tightened.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
     public static AclResult Enforce(string root)
@@ -92,17 +92,21 @@ public static partial class DataDirectoryAcl
         if (IsHardened(current))
         {
             // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
-            Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");
+            Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
             var changed = false;
+            RemoveLinks(dir, "", actions, ref changed);   // before any child's DACL changes: that propagates downwards
             ResetUntrustedChildren(dir, "", actions, ref changed);
             return new AclResult(changed ? Outcome.Tightened : Outcome.AlreadySecure, null, actions);
         }
         var ownerTrusted = IsTrustedOwner(current.GetOwner(typeof(SecurityIdentifier)));
 
-        Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");   // to set an owner on objects we cannot open otherwise
+        // To set an owner on objects we cannot open otherwise, and to read link counts whatever a planted DACL says.
+        Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
+        var removed = false;
+        // Links go before the root DACL changes: a new DACL propagates to the children, a hard-linked file among them.
+        RemoveLinks(dir, "", actions, ref removed);
         dir.SetAccessControl(OwnerOnly<DirectorySecurity>());   // owner first: the old DACL may not let us write a new one
         dir.SetAccessControl(Hardened());
-        var removed = false;
         ResetChildren(dir, "", actions, ref removed);
         actions.Add("reset the data directory and everything inside it");
         return new AclResult(ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken, null, actions);
@@ -153,6 +157,29 @@ public static partial class DataDirectoryAcl
                 actions.Add($"{rel}: reset ({reason})");
                 changed = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// Deletes every link under <paramref name="dir"/> (see <see cref="RemoveIfLink"/>) before any ACL there changes,
+    /// since setting a directory's DACL propagates inherited entries into its children. A directory that cannot be
+    /// listed yet (a planted DACL) is skipped with an action: the ACL walk, which checks every entry for links again,
+    /// covers it once it has been reset.
+    /// </summary>
+    internal static void RemoveLinks(DirectoryInfo dir, string relative, List<string> actions, ref bool changed)
+    {
+        List<FileSystemInfo> entries;
+        try { entries = dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList(); }
+        catch (UnauthorizedAccessException)
+        {
+            actions.Add($"{(relative.Length == 0 ? "." : relative)}: not listable before the reset; its links are removed during it");
+            return;
+        }
+        foreach (var entry in entries)
+        {
+            var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
+            if (RemoveIfLink(entry, rel, actions, ref changed)) continue;
+            if (entry is DirectoryInfo sub) RemoveLinks(sub, rel, actions, ref changed);
         }
     }
 

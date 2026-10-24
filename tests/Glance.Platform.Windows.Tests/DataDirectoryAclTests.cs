@@ -225,6 +225,50 @@ public class DataDirectoryAclTests
     }
 
     [Fact]
+    public void Link_pass_removes_nested_links_and_keeps_everything_else()
+    {
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var outside = Directory.CreateDirectory(Path.Combine(dir.Path, "outside")).FullName;
+        var outsideFile = Path.Combine(outside, "a.txt");
+        File.WriteAllText(outsideFile, "keep");
+        Directory.CreateDirectory(Path.Combine(root, "layouts", "deep"));
+        File.WriteAllText(Path.Combine(root, "layouts", "a.json"), "{}");
+        LinkFixtures.HardLink(Path.Combine(root, "layouts", "deep", "b.json"), outsideFile);
+        LinkFixtures.Junction(Path.Combine(root, "logs"), outside);
+        var actions = new List<string>();
+        var changed = false;
+
+        DataDirectoryAcl.RemoveLinks(new DirectoryInfo(root), "", actions, ref changed);
+
+        Assert.True(changed);
+        Assert.Equal(new[] { Path.Combine("layouts", "deep", "b.json") + ": hard link deleted", "logs: link deleted" }, actions.Order());
+        Assert.False(File.Exists(Path.Combine(root, "layouts", "deep", "b.json")));
+        Assert.False(Directory.Exists(Path.Combine(root, "logs")));
+        Assert.True(File.Exists(Path.Combine(root, "layouts", "a.json")));
+        Assert.Equal("keep", File.ReadAllText(outsideFile));
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Links_are_removed_before_the_root_dacl_changes()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var outside = Path.Combine(dir.Path, "outside.txt");   // inherits from the temp dir: a root DACL change would reach it
+        File.WriteAllText(outside, "keep");
+        var before = LinkFixtures.Sddl(outside);
+        LinkFixtures.HardLink(Path.Combine(root, "settings.json"), outside);
+
+        var result = DataDirectoryAcl.Enforce(root);
+
+        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
+        Assert.Contains("settings.json: hard link deleted", result.Actions);
+        Assert.False(File.Exists(Path.Combine(root, "settings.json")));
+        Assert.Equal(before, LinkFixtures.Sddl(outside));
+    }
+
+    [Fact]
     public void An_ordinary_file_is_not_a_link()
     {
         using var dir = new TempDir();
