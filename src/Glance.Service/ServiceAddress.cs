@@ -9,6 +9,6 @@ public static class ServiceAddress
     public static Uri LocalUrl(AppSettings s, StartupBinding binding) => binding switch
     {
         StartupBinding.LoopbackFallback => new Uri($"http://localhost:{AppSettings.DefaultPort}/"),
-        _ => new Uri($"{(s.Https ? "https" : "http")}://localhost:{s.Port}/"),
+        _ => new Uri($"{(s.NetworkAccess && s.Https ? "https" : "http")}://localhost:{s.Port}/"),
     };
 }
