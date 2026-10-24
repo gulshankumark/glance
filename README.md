@@ -175,6 +175,14 @@ Exit codes:
 A silent uninstall is `"C:\Program Files\Glance\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES`. It keeps
 `%ProgramData%\Glance`.
 
+## Releasing
+
+The owner pushes a `vX.Y.Z` tag. The `Release` workflow (`.github/workflows/release.yml`) runs the tests, builds
+the installer with `installer/build.ps1`, and publishes a GitHub release with `Glance-Setup-X.Y.Z.exe` and
+`SHA256SUMS.txt`. A tag with a `-` suffix (`v0.3.0-rc1`) is published as a pre-release. Running the workflow
+manually (`workflow_dispatch`) is a dry run: it builds version `0.0.0-dev` and uploads the installer and checksums
+as a workflow artifact without creating a release.
+
 ## Project layout
 
 | Path | What it is |
