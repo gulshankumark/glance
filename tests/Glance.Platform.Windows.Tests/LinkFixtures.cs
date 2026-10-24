@@ -1,4 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace Glance.Platform.Windows.Tests;
 
@@ -56,4 +59,33 @@ internal static class LinkFixtures
         p.WaitForExit();
         if (p.ExitCode != 0) throw new InvalidOperationException($"mklink {kind} failed: {output}");
     }
+
+    /// <summary>
+    /// What any user can do to their own file: open it with DELETE and set the legacy (non-POSIX) delete disposition.
+    /// While the returned handle stays open the name stays in the folder, but every new open of it fails.
+    /// </summary>
+    public static SafeFileHandle HoldDeletePending(string path)
+    {
+        // DELETE | FILE_READ_ATTRIBUTES, share all, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT
+        var h = CreateFileW(path, 0x10000 | 0x80, 0x1 | 0x2 | 0x4, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var info = new FileDispositionInfo { DeleteFile = 1 };
+        if (!SetFileInformationByHandle(h, 4, ref info, (uint)Marshal.SizeOf<FileDispositionInfo>()))   // class 4: FileDispositionInfo
+        {
+            var error = Marshal.GetLastWin32Error();
+            h.Dispose();
+            throw new Win32Exception(error);
+        }
+        return h;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInfo { public byte DeleteFile; }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref FileDispositionInfo info, uint size);
 }

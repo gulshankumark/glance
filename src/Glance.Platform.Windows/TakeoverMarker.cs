@@ -62,19 +62,29 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
         string? reason, content = null;
         try
         {
-            using var entry = FileLinks.OpenToRead(Path);
-            if (entry is null) return null;
-            reason = Untrusted(entry) ?? NotAMarker(entry, out content);
+            try
+            {
+                using var entry = FileLinks.OpenToRead(Path);
+                if (entry is null) return null;
+                reason = Untrusted(entry) ?? NotAMarker(entry, out content);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileDeletePendingException)
+            {
+                // Any user can plant the file and hold it open without sharing, so the content cannot be read. The
+                // metadata still can: a planted file is ignored as before, while a genuine one keeps the error, never
+                // deleted. Should even the metadata fail, that error propagates.
+                using var entry = FileLinks.OpenMetadata(Path);
+                if (entry is null) return null;
+                reason = Untrusted(entry);
+                if (reason is null) throw;
+            }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (FileDeletePendingException)
         {
-            // Any user can plant the file and hold it open without sharing, so the content cannot be read. The
-            // metadata still can: a planted file is ignored as before, while a genuine one keeps the error, never
-            // deleted. Should even the metadata fail, that error propagates.
-            using var entry = FileLinks.OpenMetadata(Path);
-            if (entry is null) return null;
-            reason = Untrusted(entry);
-            if (reason is null) throw;
+            // Already on its way out, and never genuine: Clear deletes with POSIX semantics, which unlinks the name
+            // at once, so only someone else's legacy delete leaves it pending. Treated as gone.
+            warn?.Invoke($"Ignored the takeover marker {Path}: it is pending deletion.");
+            return null;
         }
         if (reason is null) return content;
 

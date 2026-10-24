@@ -74,31 +74,27 @@ internal static partial class FileLinks
     /// Opens the entry itself (never what it points to) to read its content and security descriptor through
     /// <see cref="SecuredEntry.Handle"/>. Null when it does not exist.
     /// </summary>
-    public static SecuredEntry? OpenToRead(string path)
-    {
-        var h = Open(path, ReadControl | FileReadData | FileReadAttributes);
-        if (h is null)
-        {
-            var error = Marshal.GetLastPInvokeError();
-            if (error is ErrorFileNotFound or ErrorPathNotFound) return null;
-            throw LastError(path, error);
-        }
-        try { return new SecuredEntry(h, path, Query(h, path)); }
-        catch { h.Dispose(); throw; }
-    }
+    public static SecuredEntry? OpenToRead(string path) => OpenEntry(path, ReadControl | FileReadData | FileReadAttributes);
 
     /// <summary>
     /// Opens the entry itself (never what it points to) for its attributes and security descriptor only, without
     /// its content. Sharing modes do not cover these rights, so this succeeds while another handle denies sharing.
     /// Null when it does not exist.
     /// </summary>
-    public static SecuredEntry? OpenMetadata(string path)
+    public static SecuredEntry? OpenMetadata(string path) => OpenEntry(path, ReadControl | FileReadAttributes);
+
+    /// <summary>
+    /// Null when the entry does not exist. Throws <see cref="FileDeletePendingException"/> when it is marked for
+    /// deletion but still open somewhere: the name is still there, yet no new handle can be opened on it.
+    /// </summary>
+    private static SecuredEntry? OpenEntry(string path, uint access)
     {
-        var h = Open(path, ReadControl | FileReadAttributes);
+        var h = Open(path, access, out var status);
         if (h is null)
         {
             var error = Marshal.GetLastPInvokeError();
             if (error is ErrorFileNotFound or ErrorPathNotFound) return null;
+            if (error is ErrorAccessDenied && status == StatusDeletePending) throw new FileDeletePendingException(path);
             throw LastError(path, error);
         }
         try { return new SecuredEntry(h, path, Query(h, path)); }
@@ -220,10 +216,15 @@ internal static partial class FileLinks
         return SetFileInformationByHandle(h, FileDispositionInfoClass, ref plain, (uint)Marshal.SizeOf<FileDispositionInfo>());
     }
 
-    private static SafeFileHandle? Open(string path, uint access)
+    private static SafeFileHandle? Open(string path, uint access) => Open(path, access, out _);
+
+    /// <summary>On failure, <paramref name="ntStatus"/> is the NTSTATUS behind the Win32 error (several map to one).</summary>
+    private static SafeFileHandle? Open(string path, uint access, out int ntStatus)
     {
+        ntStatus = 0;
         var h = CreateFileW(path, access, FileShareAll, IntPtr.Zero, OpenExisting, FlagOpenReparsePoint | FlagBackupSemantics, IntPtr.Zero);
         if (!h.IsInvalid) return h;
+        ntStatus = RtlGetLastNtStatus();   // first, before any other native call on this thread can overwrite it
         var error = Marshal.GetLastPInvokeError();
         h.Dispose();
         Marshal.SetLastPInvokeError(error);
@@ -239,7 +240,7 @@ internal static partial class FileLinks
         _ => new IOException($"'{path}': {Marshal.GetPInvokeErrorMessage(error)}", unchecked((int)(0x80070000u | (uint)error))),
     };
 
-    private const int FileRenameInformation = 10, StatusObjectNameCollision = unchecked((int)0xC0000035);
+    private const int FileRenameInformation = 10, StatusObjectNameCollision = unchecked((int)0xC0000035), StatusDeletePending = unchecked((int)0xC0000056);
     private const uint FileTraverse = 0x20, FileReadData = 0x1, GenericWrite = 0x40000000;
     private const uint CreateNewDisposition = 1, FileAttributeNormal = 0x80;
     private const uint FileReadAttributes = 0x80, Delete = 0x10000, ReadControl = 0x20000, WriteDac = 0x40000, WriteOwner = 0x80000;
@@ -321,4 +322,14 @@ internal static partial class FileLinks
 
     [LibraryImport("ntdll.dll")]
     private static partial uint RtlNtStatusToDosError(int status);
+
+    [LibraryImport("ntdll.dll")]
+    private static partial int RtlGetLastNtStatus();
 }
+
+/// <summary>
+/// The entry is marked for deletion but still open somewhere: its name remains until the last handle closes, but no
+/// new handle can be opened on it (Windows reports this as access denied, hence the base type).
+/// </summary>
+public sealed class FileDeletePendingException(string path)
+    : UnauthorizedAccessException($"'{path}' is pending deletion and cannot be opened.");

@@ -69,6 +69,23 @@ public class FileTakeoverMarkerTests
         Assert.Contains("owned by", warning);
     }
 
+    [Fact]   // runs unelevated too: any user can leave their own file delete-pending
+    public void A_planted_marker_left_delete_pending_reads_as_absent_without_blocking_startup()
+    {
+        using var dir = new TempDir();
+        var warnings = new List<string>();
+        var marker = new FileTakeoverMarker(dir.Path, warnings.Add);
+        File.WriteAllText(marker.Path, Name);
+        using (LinkFixtures.HoldDeletePending(marker.Path))   // every new open now fails with STATUS_DELETE_PENDING
+        {
+            Assert.Null(marker.Read());
+        }
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains(marker.Path, warning);
+        Assert.Contains("pending", warning);
+    }
+
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
     public void A_genuine_marker_that_cannot_be_read_is_kept_and_the_read_throws()
     {
