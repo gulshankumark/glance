@@ -40,6 +40,22 @@ public class ThemeSeederTests
     }
 
     [Fact]
+    public void A_settings_write_failure_is_a_warning_not_an_exception()
+    {
+        using var f = new Fixture("Blend");
+        var settingsFile = Path.Combine(Path.GetDirectoryName(f.Themes)!, "data", "settings.json");
+        File.Delete(settingsFile);
+        Directory.CreateDirectory(settingsFile);   // the settings write after seeding now fails
+        var warnings = new List<string>();
+
+        var copied = ThemeSeeder.Seed(f.Themes, f.Layouts, f.Settings, warnings.Add);
+
+        Assert.Equal(new[] { "Blend" }, copied);
+        Assert.NotNull(f.Layouts.Get("Blend"));
+        Assert.Contains(warnings, w => w.Contains("could not record", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Deleted_theme_is_not_reseeded()
     {
         using var f = new Fixture("Blend");
