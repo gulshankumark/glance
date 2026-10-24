@@ -75,6 +75,16 @@ public class LhmSensorSourceReadTests
         Assert.Equal(0, mb.Updates);
     }
 
+    [Fact] public void Small_data_is_reported_in_gigabytes_as_data()
+    {
+        var gpu = new FakeHardware("/gpu", "GPU", HardwareType.GpuNvidia);
+        gpu.Add("/gpu/vram", "GPU Memory Used", SensorType.SmallData, 8192);
+        using var src = Make(PawnIoStatus.Running, gpu);
+        var info = Assert.Single(src.Discover());
+        Assert.Equal(SensorKind.Data, info.Kind);
+        Assert.Equal(8.0, src.Read(new HashSet<string> { "/gpu/vram" })["/gpu/vram"]);
+    }
+
     [Fact] public void Unknown_ids_are_returned_as_null()
     {
         var gpu = new FakeHardware("/gpu", "GPU", HardwareType.GpuNvidia);

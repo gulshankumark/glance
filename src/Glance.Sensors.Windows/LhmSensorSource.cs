@@ -104,7 +104,7 @@ public sealed class LhmSensorSource : ISensorSource
                 var hw = e.Sensor.Hardware;
                 if (!updated.TryGetValue(hw, out var ok)) updated[hw] = ok = TryUpdate(hw);
                 if (!ok) continue;
-                try { result[id] = ApplyPawnIoRule(e.HardwareKind, _pawnIoStatus, e.Sensor.Value); }
+                try { result[id] = ApplyPawnIoRule(e.HardwareKind, _pawnIoStatus, ToReportedUnit(e.Sensor)); }
                 catch { }
             }
             return result;
@@ -126,6 +126,9 @@ public sealed class LhmSensorSource : ISensorSource
         return status;
     }
 
+    /// <summary>LHM SmallData sensors are MB; they are reported as Data in GB (the single conversion point).</summary>
+    private static float? ToReportedUnit(ISensor s) => s.SensorType == SensorType.SmallData ? s.Value / 1024f : s.Value;
+
     internal static string MapHardwareKind(HardwareType t) => t switch
     {
         HardwareType.Cpu => "cpu",
@@ -144,7 +147,7 @@ public sealed class LhmSensorSource : ISensorSource
         SensorType.Power => SensorKind.Power,
         SensorType.Fan => SensorKind.Fan,
         SensorType.Data => SensorKind.Data,
-        SensorType.SmallData => SensorKind.SmallData,
+        SensorType.SmallData => SensorKind.Data,
         SensorType.Voltage => SensorKind.Voltage,
         SensorType.Control => SensorKind.Control,
         SensorType.Throughput => SensorKind.Throughput,
