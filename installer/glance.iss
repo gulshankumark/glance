@@ -79,6 +79,10 @@ Name: "desktopicon"; Description: "Desktop shortcut"; GroupDescription: "Shortcu
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[UninstallDelete]
+; The admin-only copy of the PawnIO setup is deleted right after it runs; this covers a crash in between.
+Type: filesandordirs; Name: "{app}\pawnio-setup"
+
 [Run]
 ; "Open Glance when setup finishes": opens the address the service itself reports (--print-url),
 ; so it follows the configured scheme and port. Runs as the original (non-elevated) user.
