@@ -1,0 +1,30 @@
+{
+  "name": "Live graphs",
+  "width": 1280,
+  "height": 480,
+  "background": { "type": "color", "color": "#05070A" },
+  "items": [
+    {"type": "text", "id": "cpu-title", "x": 40, "y": 50, "text": "CPU", "font": {"family": "JetBrains Mono", "size": 22, "weight": 700}, "color": "#FF6E5A"},
+    {"type": "sensor", "id": "cpu-temp", "x": 104, "y": 31, "sensor": "role:cpu.temperature", "font": {"family": "JetBrains Mono", "size": 40, "weight": 700}, "color": "#FFFFFF"},
+    {"type": "sensor", "id": "cpu-power-package", "x": 290, "y": 52, "sensor": "role:cpu.power.package", "label": "PWR", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "sensor", "id": "cpu-clock", "x": 460, "y": 52, "sensor": "role:cpu.clock", "label": "CLK", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "sensor", "id": "cpu-load", "x": 660, "y": 52, "sensor": "role:cpu.load", "label": "LOAD", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "historyGraph", "id": "cpu-graph", "x": 40, "y": 88, "width": 840, "height": 130, "sensor": "role:cpu.temperature", "min": 30, "max": 100, "windowSeconds": 300, "area": true, "grid": true, "color": "#FF6E5A", "trackColor": "#161C24"},
+    {"type": "text", "id": "gpu-title", "x": 40, "y": 278, "text": "GPU", "font": {"family": "JetBrains Mono", "size": 22, "weight": 700}, "color": "#76FF03"},
+    {"type": "sensor", "id": "gpu-temp", "x": 104, "y": 259, "sensor": "role:gpu.temperature", "font": {"family": "JetBrains Mono", "size": 40, "weight": 700}, "color": "#FFFFFF"},
+    {"type": "sensor", "id": "gpu-power", "x": 290, "y": 280, "sensor": "role:gpu.power", "label": "PWR", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "sensor", "id": "gpu-clock", "x": 460, "y": 280, "sensor": "role:gpu.clock", "label": "CLK", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "sensor", "id": "gpu-memory-used", "x": 660, "y": 280, "sensor": "role:gpu.memory.used", "label": "VRAM", "decimals": 1, "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9"},
+    {"type": "historyGraph", "id": "gpu-graph", "x": 40, "y": 316, "width": 840, "height": 130, "sensor": "role:gpu.temperature", "min": 30, "max": 100, "windowSeconds": 300, "area": true, "grid": true, "color": "#76FF03", "trackColor": "#161C24"},
+    {"type": "clock", "id": "time", "x": 1240, "y": 22, "font": {"family": "JetBrains Mono", "size": 64, "weight": 700}, "color": "#FFFFFF", "align": "right"},
+    {"type": "clock", "id": "date", "x": 1240, "y": 102, "format": "ddd dd MMM yyyy", "font": {"family": "JetBrains Mono", "size": 22, "weight": 400}, "color": "#6B7480", "align": "right"},
+    {"type": "text", "id": "ram-title", "x": 920, "y": 174, "text": "RAM", "font": {"family": "JetBrains Mono", "size": 22, "weight": 700}, "color": "#00E5FF"},
+    {"type": "sensor", "id": "ram-load", "x": 1240, "y": 176, "sensor": "role:memory.load", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9", "align": "right"},
+    {"type": "segmentedBar", "id": "ram-bar", "x": 920, "y": 212, "width": 320, "height": 20, "sensor": "role:memory.load", "min": 0, "max": 100, "segments": 20, "gap": 3, "color": "#00E5FF", "trackColor": "#161C24"},
+    {"type": "text", "id": "ram-used-caption", "x": 920, "y": 246, "text": "used", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#6B7480"},
+    {"type": "sensor", "id": "ram-used", "x": 1240, "y": 246, "sensor": "role:memory.used", "decimals": 1, "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9", "align": "right"},
+    {"type": "text", "id": "ram-free-caption", "x": 920, "y": 278, "text": "free", "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#6B7480"},
+    {"type": "sensor", "id": "ram-free", "x": 1240, "y": 278, "sensor": "role:memory.available", "decimals": 1, "font": {"family": "JetBrains Mono", "size": 20, "weight": 400}, "color": "#C9D1D9", "align": "right"},
+    {"type": "historyGraph", "id": "ram-graph", "x": 920, "y": 316, "width": 320, "height": 130, "sensor": "role:memory.load", "min": 0, "max": 100, "windowSeconds": 300, "area": true, "grid": true, "color": "#00E5FF", "trackColor": "#161C24"}
+  ]
+}

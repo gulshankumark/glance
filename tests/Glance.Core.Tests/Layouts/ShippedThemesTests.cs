@@ -11,7 +11,7 @@ namespace Glance.Core.Tests.Layouts;
 /// <summary>The themes shipped in <c>src/Glance.Service/themes</c>: valid, complete, legible and pixel-stable.</summary>
 public class ShippedThemesTests
 {
-    private static readonly string[] Names = { "Blend", "Clean", "Gauges" };
+    private static readonly string[] Names = { "Blend", "Clean", "Gauges", "Live graphs" };
 
     public static TheoryData<string> Themes => new(Names);
 
