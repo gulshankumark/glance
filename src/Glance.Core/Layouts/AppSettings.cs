@@ -13,6 +13,9 @@ public sealed class DeviceSettings
     /// <summary>Percentage of full brightness for the frames sent to the screen; 100 is unchanged.</summary>
     public int Brightness { get; set; } = 100;
 
+    /// <summary>True once the default layout rule ran for this screen, so a cleared layout stays cleared.</summary>
+    public bool DefaultLayoutApplied { get; set; }
+
     public const double MinGamma = 0.5, MaxGamma = 3.0;
     public const int MinBrightness = 10, MaxBrightness = 100;
     public const string GammaError = "gamma must be 0.5..3", BrightnessError = "brightness must be 10..100";
@@ -47,14 +50,17 @@ public sealed class AppSettings
     /// <summary>Ids of notices the person dismissed; they stay hidden after a restart.</summary>
     public List<string> DismissedNotices { get; set; } = new();
 
+    /// <summary>Names of shipped themes already offered; a theme the person deleted is not copied again.</summary>
+    public List<string> SeededThemes { get; set; } = new();
+
     public IReadOnlyList<string> Validate()
     {
         var e = new List<string>();
         if (Port is < 1 or > 65535) e.Add("port must be 1..65535");
         if (MaxOverlayAnimationFps is < 1 or > 60) e.Add("maxOverlayAnimationFps must be 1..60 or null");
-        if (Devices is null || Aliases is null || RolePins is null || DismissedNotices is null)
+        if (Devices is null || Aliases is null || RolePins is null || DismissedNotices is null || SeededThemes is null)
         {
-            e.Add("devices, aliases, rolePins and dismissedNotices must not be null");
+            e.Add("devices, aliases, rolePins, dismissedNotices and seededThemes must not be null");
             return e;
         }
         foreach (var (key, d) in Devices)

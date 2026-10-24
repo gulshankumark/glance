@@ -205,4 +205,68 @@ public class DeviceManagerTests
         await h.Settle();
         Assert.Empty(h.Manager.Devices);
     }
+
+    private static void SaveLayout(ManagerHarness h, string name) =>
+        h.Layouts.Save(System.Text.Json.JsonSerializer.Deserialize<Glance.Core.Layouts.Layout>(
+            Glance.Core.Tests.Layouts.LayoutJsonTests.Sample.Replace("\"Gaming\"", $"\"{name}\""), Glance.Core.Layouts.GlanceJson.Options)!);
+
+    private static async Task Replug(ManagerHarness h, string serial)
+    {
+        h.LastConnection.ThrowOnSend = new IOException("gone"); h.Usb.Clear();
+        await h.Advance(TimeSpan.FromSeconds(2));
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected(serial);
+        await h.Advance(TimeSpan.FromSeconds(6));
+    }
+
+    [Fact] public async Task New_device_gets_Blend()
+    {
+        using var h = new ManagerHarness(); SaveLayout(h, "Blend");
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected("SER1");
+        await h.Manager.RescanAsync();
+        var s = h.Settings.Current.Devices["fake_SER1"];
+        Assert.Equal("Blend", s.ActiveLayout);
+        Assert.True(s.DefaultLayoutApplied);
+    }
+
+    [Fact] public async Task Existing_device_with_null_layout_gets_Blend_once()
+    {
+        using var h = new ManagerHarness(); SaveLayout(h, "Blend");
+        h.Settings.Update(s => s.Devices["fake_SER1"] = new Glance.Core.Layouts.DeviceSettings());
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected("SER1");
+        await h.Manager.RescanAsync();
+        Assert.Equal("Blend", h.Settings.Current.Devices["fake_SER1"].ActiveLayout);
+        Assert.True(h.Settings.Current.Devices["fake_SER1"].DefaultLayoutApplied);
+    }
+
+    [Fact] public async Task Cleared_layout_stays_cleared()
+    {
+        using var h = new ManagerHarness(); SaveLayout(h, "Blend");
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected("SER1");
+        await h.Manager.RescanAsync();
+        h.Settings.Update(s => s.Devices["fake_SER1"].ActiveLayout = null);
+        await Replug(h, "SER1");
+        Assert.Equal(DeviceStatus.Connected, h.Manager.Devices.Single().Status);
+        Assert.Null(h.Settings.Current.Devices["fake_SER1"].ActiveLayout);
+    }
+
+    [Fact] public async Task Device_with_layout_keeps_it()
+    {
+        using var h = new ManagerHarness(); SaveLayout(h, "Blend"); SaveLayout(h, "Mine");
+        h.Settings.Update(s => s.Devices["fake_SER1"] = new Glance.Core.Layouts.DeviceSettings { ActiveLayout = "Mine" });
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected("SER1");
+        await h.Manager.RescanAsync();
+        var d = h.Settings.Current.Devices["fake_SER1"];
+        Assert.Equal("Mine", d.ActiveLayout);
+        Assert.True(d.DefaultLayoutApplied);
+    }
+
+    [Fact] public async Task Missing_Blend_leaves_null_and_marks_applied()
+    {
+        using var h = new ManagerHarness();
+        h.Usb.Add(Dev("p1")); h.Driver.Next = Connected("SER1");
+        await h.Manager.RescanAsync();
+        var d = h.Settings.Current.Devices["fake_SER1"];
+        Assert.Null(d.ActiveLayout);
+        Assert.True(d.DefaultLayoutApplied);
+    }
 }

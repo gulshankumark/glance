@@ -103,4 +103,14 @@ public class SettingsRepairTests
         Assert.Contains(r, x => x.StartsWith("port"));
         Assert.Empty(SettingsRepair.Load("{}").Item1.DismissedNotices);
     }
+
+    [Fact]
+    public void Bad_seededThemes_type_resets_to_empty()
+    {
+        var (s, r) = SettingsRepair.Load("""{"port":9000,"seededThemes":"Blend"}""");
+        Assert.Empty(s.SeededThemes);
+        Assert.Equal(9000, s.Port);
+        Assert.Contains(r, x => x.StartsWith("seededThemes"));
+        Assert.Equal(["Blend"], SettingsRepair.Load("""{"seededThemes":["Blend"]}""").Item1.SeededThemes);
+    }
 }

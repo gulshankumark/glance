@@ -69,8 +69,8 @@ s.AddSingleton(sp => new DeviceManager(
         sp.GetRequiredService<SensorHub>(), sp.GetRequiredService<IAssetStore>(), sp.GetRequiredService<OverlayRenderer>(),
         sp.GetRequiredService<FontProvider>(), sp.GetRequiredService<TimeProvider>(),
         sp.GetRequiredService<ILoggerFactory>().CreateLogger<DisplaySession>(), sp.GetRequiredService<IJpegCodec>()),
-    sp.GetRequiredService<SettingsStore>(), sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<ILoggerFactory>().CreateLogger<DeviceManager>()));
+    sp.GetRequiredService<SettingsStore>(), n => sp.GetRequiredService<LayoutStore>().Get(n) is not null,
+    sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILoggerFactory>().CreateLogger<DeviceManager>()));
 s.AddHostedService(sp => sp.GetRequiredService<DeviceManager>());
 s.AddHostedService<CoreRunner>();
 s.AddHostedService(sp => new ShortcutSync(
@@ -86,6 +86,10 @@ s.AddHostedService(sp => new FirewallSync(
 s.AddGlanceSecurity(paths);
 
 var app = builder.Build();
+// Hosted services (so DeviceManager) start at app.Run, after this; a theme problem never stops startup.
+var seeded = ThemeSeeder.Seed(Path.Combine(AppContext.BaseDirectory, "themes"),
+    app.Services.GetRequiredService<LayoutStore>(), settings, m => app.Logger.LogWarning("{Message}", m));
+if (seeded.Count > 0) app.Logger.LogInformation("Copied shipped themes: {Themes}", string.Join(", ", seeded));
 if (settings.LoadError is not null)
     app.Services.GetRequiredService<NoticeBoard>().Add(new Notice(
         $"settings-repaired-{DateTime.UtcNow:yyyyMMddHHmmss}", "warning",

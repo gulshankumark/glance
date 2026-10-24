@@ -22,6 +22,7 @@ public sealed class DeviceManager : BackgroundService
     private readonly IHidPortFactory _ports;
     private readonly Func<IDisplayConnection, DisplaySession> _sessionFactory;
     private readonly SettingsStore _settings;
+    private readonly Func<string, bool> _layoutExists;
     private readonly TimeProvider _time;
     private readonly ILogger _log;
 
@@ -35,13 +36,14 @@ public sealed class DeviceManager : BackgroundService
     private static readonly TimeSpan HealthyAfter = TimeSpan.FromSeconds(30);
 
     public DeviceManager(IEnumerable<IDisplayDriver> drivers, IUsbEnumerator usb, IHidPortFactory ports,
-        Func<IDisplayConnection, DisplaySession> sessionFactory, SettingsStore settings, TimeProvider time, ILogger log)
+        Func<IDisplayConnection, DisplaySession> sessionFactory, SettingsStore settings, Func<string, bool> layoutExists, TimeProvider time, ILogger log)
     {
         _drivers = drivers.ToList();
         _usb = usb;
         _ports = ports;
         _sessionFactory = sessionFactory;
         _settings = settings;
+        _layoutExists = layoutExists;
         _time = time;
         _log = log;
     }
@@ -199,8 +201,15 @@ public sealed class DeviceManager : BackgroundService
         DisplaySession session;
         try
         {
-            if (!_settings.Current.Devices.ContainsKey(info.Key))
-                _settings.Update(s => s.Devices.TryAdd(info.Key, new DeviceSettings { Rotation = 0, ActiveLayout = null }));
+            if (!_settings.Current.Devices.TryGetValue(info.Key, out var known) || !known.DefaultLayoutApplied)
+                _settings.Update(s =>
+                {
+                    s.Devices.TryAdd(info.Key, new DeviceSettings { Rotation = 0, ActiveLayout = null });
+                    var d = s.Devices[info.Key];
+                    if (d.DefaultLayoutApplied) return;
+                    if (d.ActiveLayout is null && _layoutExists("Blend")) d.ActiveLayout = "Blend";
+                    d.DefaultLayoutApplied = true;
+                });
             session = _sessionFactory(conn);
         }
         catch (Exception ex)
