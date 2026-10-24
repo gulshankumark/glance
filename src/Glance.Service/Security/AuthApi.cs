@@ -108,13 +108,14 @@ public static class AuthApi
             {
                 settings.Update(s =>
                 {
-                    var boundPort = s.Port;
+                    // The fallback listens on the default port, not the configured one.
+                    var heldPort = NetworkConfig.HeldPort(binding.Mode, s.Port);
                     s.NetworkAccess = enabled;
                     if (body.Https is { } https) s.Https = https;
                     if (body.Port is { } port) s.Port = port;
-                    // The port Kestrel holds now is ours to move between addresses; any other port must be free first,
-                    // or the reload would leave the UI with no endpoint.
-                    if ((s.Port != boundPort || binding.Mode != StartupBinding.Configured) && !NetworkConfig.CanBindAll(s))
+                    // The port Kestrel holds now is ours to move between addresses (a probe would only find ourselves);
+                    // any other port must be free first, or the reload would leave the UI with no endpoint.
+                    if (s.Port != heldPort && !NetworkConfig.CanBindAll(s))
                         throw new PortUnavailableException($"port {s.Port} is in use by another program");
                     if (s.NetworkAccess && s.Https) SelfSignedCert.EnsureCreated(paths, s);
                 }, committed =>

@@ -6,6 +6,7 @@ using System.Text.Json;
 using Glance.Core.Layouts;
 using Glance.Service.Security;
 using Glance.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Glance.Service.Tests;
 
@@ -108,5 +109,43 @@ public class NetworkConfigTests
         Assert.Equal(HttpStatusCode.OK, (await c.PutAsync("/api/settings/network", Json(new { enabled = false, port }))).StatusCode);
         Assert.Equal(port, f.Settings.Current.Port);
         Assert.Contains($"http://127.0.0.1:{port}", File.ReadAllText(Path.Combine(f.DataDir, "kestrel.json")));
+    }
+
+    [Fact]
+    public void Fallback_running_message_names_bound_port()
+    {
+        var s = new AppSettings { Port = 9100, NetworkAccess = true, Https = true };
+
+        var message = NetworkConfig.StartupMessage(StartupBinding.LoopbackFallback, s);
+
+        Assert.Contains("port 9100 on the network", message);   // what could not be used
+        Assert.Contains($"http://localhost:{AppSettings.DefaultPort} ", message);   // what is bound: loopback, http
+        Assert.Contains($"port 9100 nor the default port {AppSettings.DefaultPort}", NetworkConfig.StartupMessage(StartupBinding.None, s));
+        Assert.Null(NetworkConfig.StartupMessage(StartupBinding.Configured, s));
+        Assert.Equal(AppSettings.DefaultPort, NetworkConfig.HeldPort(StartupBinding.LoopbackFallback, 9100));
+        Assert.Equal(9100, NetworkConfig.HeldPort(StartupBinding.Configured, 9100));
+        Assert.Null(NetworkConfig.HeldPort(StartupBinding.None, 9100));
+    }
+
+    [Fact]
+    public async Task Port_probe_of_current_fallback_port_is_not_conflict()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        f.Settings.Update(s => s.Port = FreePort());   // the configured port the fallback stands in for
+        var binding = f.Services.GetRequiredService<WebBindingState>();
+        binding.Mode = StartupBinding.LoopbackFallback;
+        // Stands in for our own fallback listener; when this fails, a running Glance holds the port, which is as good.
+        TcpListener? ours = null;
+        try { ours = new TcpListener(IPAddress.Loopback, AppSettings.DefaultPort); ours.Start(); }
+        catch (SocketException) { ours = null; }
+        try
+        {
+            var r = await c.PutAsync("/api/settings/network", Json(new { enabled = false, port = AppSettings.DefaultPort }));
+
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(AppSettings.DefaultPort, f.Settings.Current.Port);
+            Assert.Equal(StartupBinding.Configured, binding.Mode);
+        }
+        finally { ours?.Stop(); }
     }
 }

@@ -83,12 +83,8 @@ else if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.Quarantined)
     app.Logger.LogWarning("The data directory {Root} was moved aside to {Quarantine} and rebuilt", paths.Root, dataDirAcl.QuarantineDir);
 else if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.Tightened)
     app.Logger.LogInformation("The data directory {Root} was restricted to SYSTEM and Administrators", paths.Root);
-if (binding == StartupBinding.LoopbackFallback)
-    app.Logger.LogError("The web UI could not use port {Port}{Network}; it is on http://localhost:{Fallback} (this computer only) until the network settings change or Glance restarts",
-        settings.Current.Port, settings.Current.NetworkAccess ? " on the network" : "", AppSettings.DefaultPort);
-else if (binding == StartupBinding.None)
-    app.Logger.LogError("No web UI: neither port {Port} nor the default port {Fallback} could be bound. Screens and sensors keep running; free the port and restart Glance",
-        settings.Current.Port, AppSettings.DefaultPort);
+if (NetworkConfig.StartupMessage(binding, settings.Current) is { } bindingMessage)
+    app.Logger.LogError("{Message}", bindingMessage);
 app.UseAuthentication();
 app.UseMiddleware<AccessGate>();   // before static files and endpoints
 app.UseDefaultFiles();
