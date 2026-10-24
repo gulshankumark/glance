@@ -12,8 +12,8 @@ public sealed class FirewallSync(SettingsStore settings, WebBindingState binding
     : IHostedService, IDisposable
 {
     private readonly object _gate = new();
-    private bool _subscribed, _known, _skipLogged;
-    private int? _applied; // what the firewall holds, as of the last successful read/apply
+    private bool _subscribed, _synced, _skipLogged;
+    private int? _applied; // valid only while _synced: what the last successful apply left in the firewall
 
     public Task StartAsync(CancellationToken ct)
     {
@@ -52,13 +52,16 @@ public sealed class FirewallSync(SettingsStore settings, WebBindingState binding
                 }
                 var s = settings.Current;
                 int? desired = binding.Mode == StartupBinding.Configured && s.NetworkAccess ? s.Port : null;
-                if (!_known) { _applied = firewall.RulePort(); _known = true; }
-                if (_applied == desired) return;
+                // Never trust the firewall's current state (RulePort cannot tell "absent" from "unreadable"):
+                // the first sync, and any sync after a failure, applies the desired state unconditionally.
+                if (_synced && _applied == desired) return;
                 if (desired is { } port) firewall.Upsert(port); else firewall.Remove();
                 _applied = desired;
+                _synced = true;
             }
             catch (Exception e)
             {
+                _synced = false; // a failed upsert may have deleted the old rule: re-apply on the next sync
                 log.LogWarning(e, "Updating the firewall rule failed; it will be retried on the next change");
             }
         }

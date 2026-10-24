@@ -14,7 +14,8 @@ public class FirewallSyncTests
         public int? Port;
         public List<string> Calls = [];
         public bool Fail;
-        public int? RulePort() { Calls.Add("show"); return Port; }
+        public bool RulePortUnknown;
+        public int? RulePort() { Calls.Add("show"); return RulePortUnknown ? null : Port; }
         public void Upsert(int port) { if (Fail) throw new InvalidOperationException("netsh failed"); Calls.Add($"upsert {port}"); Port = port; }
         public void Remove() { if (Fail) throw new InvalidOperationException("netsh failed"); Calls.Add("remove"); Port = null; }
         public string[] Changes => Calls.Where(c => c != "show").ToArray();
@@ -96,9 +97,9 @@ public class FirewallSyncTests
         var binding = new WebBindingState(StartupBinding.LoopbackFallback);
         using var sync = Make(store, binding, fw);
         await sync.StartAsync(default);
-        Assert.Empty(fw.Changes);
+        Assert.Equal(["remove"], fw.Changes); // first sync always reconciles
         binding.Mode = StartupBinding.Configured;
-        Assert.Equal(["upsert 8735"], fw.Changes);
+        Assert.Equal(["remove", "upsert 8735"], fw.Changes);
     }
 
     [Fact]
@@ -119,14 +120,41 @@ public class FirewallSyncTests
     }
 
     [Fact]
-    public async Task Startup_matching_rule_makes_no_change()
+    public async Task First_sync_upserts_even_if_rule_matches()
     {
         var (dir, store) = Arrange(s => s.NetworkAccess = true);
         using var _ = dir;
         var fw = new FakeFirewall { Port = 8735 };
         using var sync = Make(store, new WebBindingState(StartupBinding.Configured), fw);
         await sync.StartAsync(default);
-        Assert.Empty(fw.Changes);
+        Assert.Equal(["upsert 8735"], fw.Changes);
+    }
+
+    [Fact]
+    public async Task First_sync_removes_rule_when_network_off_even_if_state_unknown()
+    {
+        var (dir, store) = Arrange();
+        using var _ = dir;
+        var fw = new FakeFirewall { Port = 8735, RulePortUnknown = true };
+        using var sync = Make(store, new WebBindingState(StartupBinding.Configured), fw);
+        await sync.StartAsync(default);
+        Assert.Equal(["remove"], fw.Changes);
+        Assert.Null(fw.Port);
+    }
+
+    [Fact]
+    public async Task Failed_upsert_retries_even_when_port_returns_to_previous_value()
+    {
+        var (dir, store) = Arrange(s => s.NetworkAccess = true);
+        using var _ = dir;
+        var fw = new FakeFirewall();
+        using var sync = Make(store, new WebBindingState(StartupBinding.Configured), fw);
+        await sync.StartAsync(default);
+        fw.Fail = true;
+        store.Update(s => s.Port = 9100); // fails; real upsert would have deleted the old rule
+        fw.Fail = false;
+        store.Update(s => s.Port = 8735);
+        Assert.Equal(["upsert 8735", "upsert 8735"], fw.Changes);
     }
 
     [Fact]

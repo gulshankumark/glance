@@ -25,9 +25,16 @@ public sealed class NetshFirewall : IFirewall
 
     private static void DeleteIgnoringMissing()
     {
-        // A missing rule makes netsh exit non-zero ("No rules match"); that is the state we want.
-        Netsh("delete", "rule", $"name={IFirewall.RuleName}");
+        var (code, output) = Netsh("delete", "rule", $"name={IFirewall.RuleName}");
+        if (code == 0) return;
+        // Non-zero is also what a missing rule gives; exit codes (not text) tell the two apart.
+        var (showCode, _) = Netsh("show", "rule", $"name={IFirewall.RuleName}");
+        if (!DeleteSucceeded(code, showCode))
+            throw new InvalidOperationException($"netsh delete rule failed ({code}) and the rule still exists: {output.Trim()}");
     }
+
+    /// <summary>The rule is gone if delete succeeded, or if delete failed and the rule can no longer be shown.</summary>
+    public static bool DeleteSucceeded(int deleteExit, int showExit) => deleteExit == 0 || showExit != 0;
 
     /// <summary>
     /// Reads the first <c>LocalPort:</c> value from <c>netsh ... show rule</c> output. Only the field label is matched;
@@ -57,7 +64,11 @@ public sealed class NetshFirewall : IFirewall
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("netsh could not be started");
         var err = p.StandardError.ReadToEndAsync();
         var outp = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
+        if (!p.WaitForExit(30_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            throw new TimeoutException("netsh did not finish within 30 seconds");
+        }
         return (p.ExitCode, outp + err.GetAwaiter().GetResult());
     }
 }
