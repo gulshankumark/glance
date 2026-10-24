@@ -28,7 +28,7 @@ public class DataDirectoryStartupTests
         (string Root, ITakeoverMarker Marker)? seen = null;
         var ok = new DataDirectoryAcl.AclResult(DataDirectoryAcl.Outcome.AlreadySecure, null, []);
 
-        var result = DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, (root, marker) => { seen = (root, marker); return ok; });
+        var result = DataDirectoryStartup.Enforce(paths.Root, shouldEnforce: true, Marker, (root, marker) => { seen = (root, marker); return ok; });
 
         Assert.Same(ok, result);
         Assert.Equal((paths.Root, Marker), seen);
@@ -40,7 +40,7 @@ public class DataDirectoryStartupTests
         using var dir = new TempDir();
         var paths = new GlancePaths(dir.Path);
 
-        var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
+        var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths.Root, shouldEnforce: true, Marker, Fail));
 
         Assert.StartsWith("boom", ex.Message);   // rethrown unchanged, so the Event Log still gets it
         var log = Assert.Single(Directory.GetFiles(paths.Logs, "glance-*.log"));
@@ -61,7 +61,7 @@ public class DataDirectoryStartupTests
             psi.ArgumentList.Add(a);
         using (var p = Process.Start(psi)!) { p.StandardOutput.ReadToEnd(); p.WaitForExit(); Assert.Equal(0, p.ExitCode); }
 
-        Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
+        Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths.Root, shouldEnforce: true, Marker, Fail));
 
         Assert.Equal("keep", File.ReadAllText(outside));
     }
@@ -81,7 +81,7 @@ public class DataDirectoryStartupTests
         {
             Assert.ThrowsAny<Exception>(() => _ = new DirectoryInfo(paths.Root).Attributes);   // the precondition: no stat
 
-            var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
+            var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths.Root, shouldEnforce: true, Marker, Fail));
 
             Assert.StartsWith("boom", ex.Message);
         }
@@ -104,6 +104,65 @@ public class DataDirectoryStartupTests
     public void Nothing_is_enforced_when_not_asked()
     {
         using var dir = new TempDir();
-        Assert.Null(DataDirectoryStartup.Enforce(new GlancePaths(dir.Path), shouldEnforce: false, Marker, Fail));
+        Assert.Null(DataDirectoryStartup.Enforce(new GlancePaths(dir.Path).Root, shouldEnforce: false, Marker, Fail));
+    }
+
+    [Fact]
+    public void Open_hardens_and_enforces_the_root_before_any_subfolder_exists()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "Glance");
+        var calls = new List<string>();
+        var ok = new DataDirectoryAcl.AclResult(DataDirectoryAcl.Outcome.AlreadySecure, null, []);
+        string[] Subfolders() => ["layouts", "assets", "logs"];
+        bool AnySubfolder() => Subfolders().Any(s => Directory.Exists(Path.Combine(root, s)));
+
+        var (paths, result) = DataDirectoryStartup.Open(root, shouldEnforce: true, Marker,
+            r =>
+            {
+                calls.Add("create:" + r);
+                Assert.False(Directory.Exists(r));   // nothing was created before the root got its hardened descriptor
+                Directory.CreateDirectory(r);
+                return true;
+            },
+            (r, m) =>
+            {
+                calls.Add("enforce:" + r);
+                Assert.Same(Marker, m);
+                Assert.False(AnySubfolder());   // enforce sees only what was already there
+                return ok;
+            });
+
+        Assert.Equal(["create:" + root, "enforce:" + root], calls);
+        Assert.Same(ok, result);
+        Assert.Equal(root, paths.Root);
+        Assert.All(Subfolders(), s => Assert.True(Directory.Exists(Path.Combine(root, s))));
+    }
+
+    [Fact]
+    public void Open_creates_no_subfolder_when_enforce_fails()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "Glance");
+
+        Assert.Throws<IOException>(() => DataDirectoryStartup.Open(root, shouldEnforce: true, Marker,
+            r => { Directory.CreateDirectory(r); return true; }, Fail));
+
+        Assert.False(Directory.Exists(Path.Combine(root, "layouts")));
+        Assert.False(Directory.Exists(Path.Combine(root, "assets")));
+    }
+
+    [Fact]
+    public void Open_without_enforcement_only_creates_the_folders()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "Glance");
+
+        var (paths, result) = DataDirectoryStartup.Open(root, shouldEnforce: false, Marker,
+            _ => throw new InvalidOperationException("must not harden"), Fail);
+
+        Assert.Null(result);
+        Assert.True(Directory.Exists(paths.Layouts));
+        Assert.True(Directory.Exists(paths.Logs));
     }
 }

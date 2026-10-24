@@ -19,15 +19,16 @@ if (Cli.TryRun(args) is { } cliExit) return cliExit;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var paths = GlancePaths.Default();
 // Before anything is read from or written to it (settings, keys, logs): only SYSTEM and Administrators may use it.
-// The takeover marker sits next to the data directory (%ProgramData%), so it can be written before anything changes.
+// Nothing is created inside it until then: the subfolders follow the enforcement. The takeover marker sits next to the
+// data directory (%ProgramData%), so it can be written before anything changes. A quarantine moved the subfolders aside
+// too; they are created afterwards, empty, so Glance starts from defaults.
+var root = GlancePaths.DefaultRoot();
 var markerWarnings = new List<string>();
-var dataDirAcl = DataDirectoryStartup.Enforce(paths,
+var (paths, dataDirAcl) = DataDirectoryStartup.Open(root,
     DataDirectoryAcl.ShouldEnforce(GlancePaths.IsOverridden, DataDirectoryAcl.IsElevated()),
-    new FileTakeoverMarker(Directory.GetParent(paths.Root)?.FullName ?? paths.Root, markerWarnings.Add), DataDirectoryAcl.Enforce);
-// A quarantine moved the subfolders aside too: recreate them, empty, so Glance starts from defaults.
-if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.Quarantined) paths = new GlancePaths(paths.Root);
+    new FileTakeoverMarker(Directory.GetParent(root)?.FullName ?? root, markerWarnings.Add),
+    DataDirectoryAcl.CreateHardenedIfMissing, DataDirectoryAcl.Enforce);
 var settings = new SettingsStore(paths);
 // kestrel.json is rebuilt from settings at every start; a port that cannot be bound must not take the screens down.
 var binding = NetworkConfig.ApplyAtStartup(paths, settings, NetworkConfig.CanBind);
