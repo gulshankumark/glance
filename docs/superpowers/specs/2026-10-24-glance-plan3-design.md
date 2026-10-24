@@ -23,6 +23,7 @@ other setting. After Plan 3, Glance on Windows is releasable.
 - Two new sensors so the default theme shows everything the owner asked for.
 - I5a and I5b fixed, with tests.
 - Per-field settings repair, with tests, surfaced in the UI.
+- Installer built by GitHub Actions and published as a GitHub Release (§8a).
 
 ### Non-goals
 - Linux (packaging, silent install, hwmon) — next plan.
@@ -273,6 +274,33 @@ One small mechanism serves §6.2 and §7: the service holds a list of startup no
 dismiss button. Dismissal stored in settings (or a small file) by notice id. Builder's
 call on shape; keep it minimal.
 
+## 8a. Build and release on GitHub
+
+Owner wants the installer built on GitHub and published as a GitHub Release.
+
+- **Workflow:** `.github/workflows/release.yml`, runs on `windows-latest`.
+- **Trigger:** pushing a tag `v*` (e.g. `v0.3.0`), plus manual `workflow_dispatch`
+  for a dry run that uploads the installer as a workflow artifact without releasing.
+- **Version:** taken from the tag (`v0.3.0` → `0.3.0`); stamped into the .NET build
+  (`-p:Version=`) and the Inno script (`/DAppVersion=`). Local builds without a tag
+  use `0.0.0-dev`.
+- **Steps:** checkout → setup .NET → run all tests (release fails if any test fails) →
+  `dotnet publish` self-contained win-x64 → install Inno Setup if the runner lacks it →
+  compile installer → compute SHA-256 → create release.
+- **Release contents:** `Glance-Setup-<version>.exe` and `SHA256SUMS.txt`.
+- **Release notes:** template in the repo (`installer/release-notes.md`): what changed
+  (from commits since previous tag), the SmartScreen "More info → Run anyway" steps
+  (unsigned, per design §9.2a), the checksum, and the silent-install switches.
+- **Pre-release:** tags with a suffix (`v0.3.0-rc1`) publish as pre-release.
+- **Permissions:** workflow gets `contents: write` only; uses the built-in
+  `GITHUB_TOKEN`, no extra secrets.
+- **Who pushes the tag:** the owner. The builder never pushes tags or triggers a release.
+- **Repo hygiene:** the workflow only builds from repo sources; PawnIO is still
+  downloaded at install time on the user's machine, never bundled in the release.
+
+**Tests:** a manual `workflow_dispatch` dry run must produce an installer that passes the
+hardware smoke before the first real tag.
+
 ## 9. Work order (small commits)
 
 1. Sensors: `memory.available`, `gpu.memory.used`.
@@ -284,7 +312,11 @@ call on shape; keep it minimal.
 7. Theme seeding (deletion sticks) + default-layout rule.
 8. Themes, one commit each.
 9. Installer script, then silent mode, PawnIO, TRCC handling, uninstall.
-10. Hardware smoke on the real screen (incl. elevated ACL test); owner reviews themes.
+10. Version stamping (tag → .NET + Inno).
+11. Release workflow + release-notes template; dry run via `workflow_dispatch`.
+12. Hardware smoke with the CI-built installer (incl. elevated ACL test); owner reviews
+    themes.
+13. Owner pushes the first tag; release appears on GitHub.
 
 ## 10. Decided by the owner
 - Plan 3 is Windows only; Linux next.
@@ -294,6 +326,7 @@ call on shape; keep it minimal.
   available, date/time.
 - Four themes: Blend (default), Clean, Gauges, Live graphs.
 - I5b: quarantine and start with defaults, with a warning to the user.
+- Installer built on GitHub and published as a GitHub Release.
 
 ## 11. Calls made by the designer (check these)
 - Pin PawnIO URL + SHA-256; offline install continues without PawnIO.
@@ -310,6 +343,8 @@ call on shape; keep it minimal.
 - Devices with no layout get Blend once (incl. existing Plan 2 devices); clearing it
   later sticks. Deleted themes stay deleted.
 - One notice mechanism shared by settings repair and quarantine; banners dismissible.
+- Release triggered by owner-pushed `v*` tag; suffix tags are pre-releases; tests gate
+  the release; SHA256SUMS shipped; still unsigned.
 
 ## 12. Left to the builder
 Exact theme geometry and colours; where theme copying lives; VRAM unit conversion
