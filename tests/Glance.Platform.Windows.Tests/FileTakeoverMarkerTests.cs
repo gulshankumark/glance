@@ -94,9 +94,13 @@ public class FileTakeoverMarkerTests
         var warnings = new List<string>();
         var marker = new FileTakeoverMarker(dir.Path, warnings.Add);
         marker.Write(Name);
-        using (new FileStream(marker.Path, FileMode.Open, FileAccess.Read, FileShare.None))   // e.g. AV scanning at boot
+        // A sharing lock does not stop an elevated backup-semantics open, but a byte-range lock fails the read
+        // whatever the reader's privileges (e.g. a scanner locking the file at boot).
+        using (var holder = new FileStream(marker.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
+            holder.Lock(0, holder.Length);
             Assert.ThrowsAny<IOException>(() => marker.Read());
+            holder.Unlock(0, holder.Length);
         }
 
         Assert.True(File.Exists(marker.Path));   // a genuine marker survives a transient error
