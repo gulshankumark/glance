@@ -18,8 +18,11 @@ public sealed class SettingsStore
 
     public AppSettings Current { get { lock (_gate) return _current; } }
 
-    /// <summary>Set when settings.json could not be used and defaults are in effect.</summary>
+    /// <summary>Set when settings.json could not be used as is: the repairs joined with "; ", or why the whole file was dropped.</summary>
     public string? LoadError { get; private set; }
+
+    /// <summary>One entry per field of settings.json reset to its default on load; empty when the file was clean.</summary>
+    public IReadOnlyList<string> Repairs { get; private set; } = [];
 
     /// <summary>
     /// Applies <paramref name="change"/> to a copy, validates it, writes atomically, then publishes it. An exception from
@@ -58,17 +61,24 @@ public sealed class SettingsStore
         if (!File.Exists(_paths.Settings)) return new AppSettings();
         try
         {
-            var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_paths.Settings), GlanceJson.Options)
-                    ?? throw new JsonException("settings file is empty");
-            var errors = s.Validate();
-            if (errors.Count > 0) throw new JsonException(string.Join("; ", errors));
-            return s;
+            var (settings, repairs) = SettingsRepair.Load(File.ReadAllText(_paths.Settings));
+            if (repairs.Count == 0) return settings;
+            Repairs = repairs;
+            LoadError = string.Join("; ", repairs);
+            KeepOriginal();
+            try { AtomicFile.Write(_paths.Settings, JsonSerializer.Serialize(settings, GlanceJson.Options)); } catch { }
+            return settings;
         }
         catch (Exception ex)
         {
             LoadError = ex.Message;
-            try { File.Copy(_paths.Settings, _paths.Settings + ".corrupt", overwrite: true); } catch { }
+            KeepOriginal();
             return new AppSettings();
         }
+    }
+
+    private void KeepOriginal()
+    {
+        try { File.Copy(_paths.Settings, _paths.Settings + ".corrupt", overwrite: true); } catch { }
     }
 }

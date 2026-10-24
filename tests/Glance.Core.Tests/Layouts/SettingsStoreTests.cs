@@ -55,6 +55,23 @@ public class SettingsStoreTests
     }
 
     [Fact]
+    public void Repaired_file_is_saved_and_original_kept_as_corrupt()
+    {
+        using var dir = new TempDir(); var paths = new GlancePaths(dir.Path);
+        const string original = """{"port":9000,"devices":{"k":{"gamma":9,"rotation":90}}}""";
+        File.WriteAllText(paths.Settings, original);
+        var s = new SettingsStore(paths);
+        Assert.Equal(9000, s.Current.Port);
+        Assert.Equal(1.0, s.Current.Devices["k"].Gamma);
+        Assert.Equal(original, File.ReadAllText(paths.Settings + ".corrupt"));
+        Assert.Contains("gamma", s.LoadError);
+        Assert.NotEmpty(s.Repairs);
+        var reloaded = new SettingsStore(paths);
+        Assert.Equal(1.0, reloaded.Current.Devices["k"].Gamma);
+        Assert.Null(reloaded.LoadError);
+    }
+
+    [Fact]
     public void Update_raises_Changed()
     {
         using var dir = new TempDir(); var s = new SettingsStore(new GlancePaths(dir.Path));
