@@ -128,6 +128,10 @@ The installer registers the `Glance` service (LocalSystem, automatic start), cre
 `%ProgramData%\Glance` data directory, starts the service and waits up to 30 s for it to answer. Uninstalling
 removes the service and shortcuts and asks whether to delete `%ProgramData%\Glance` (a silent uninstall keeps it).
 
+The install folder must be inside `C:\Program Files`. The service runs as SYSTEM, and folders elsewhere (such as
+`C:\Glance`) can be writable by ordinary users. The wizard refuses any other folder, and a silent install with
+`/DIR=` pointing elsewhere aborts with a non-zero exit code.
+
 ## Project layout
 
 | Path | What it is |
