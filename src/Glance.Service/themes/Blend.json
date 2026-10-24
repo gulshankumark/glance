@@ -1,0 +1,42 @@
+{
+  "name": "Blend",
+  "width": 1280,
+  "height": 480,
+  "background": { "type": "color", "color": "#0B0D16" },
+  "items": [
+    { "type": "text", "id": "cpu-title", "x": 40, "y": 34, "text": "CPU", "font": { "family": "Inter", "size": 22, "weight": 700 }, "color": "#FF5E7E" },
+    { "type": "arcGauge", "id": "cpu-temp", "x": 40, "y": 78, "width": 200, "height": 200, "sensor": "role:cpu.temperature", "color": "#FF5E7E", "trackColor": "#222739", "thickness": 14, "showValue": true, "font": { "family": "Inter", "size": 40, "weight": 700 } },
+    { "type": "text", "id": "cpu-temp-caption", "x": 140, "y": 210, "text": "TEMP", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3", "align": "center" },
+    { "type": "text", "id": "cpu-power-caption", "x": 268, "y": 92, "text": "POWER", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "cpu-power", "x": 268, "y": 110, "sensor": "role:cpu.power.package", "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "cpu-clock-caption", "x": 268, "y": 160, "text": "CLOCK", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "cpu-clock", "x": 268, "y": 178, "sensor": "role:cpu.clock", "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "cpu-load-caption", "x": 268, "y": 228, "text": "LOAD", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "cpu-load", "x": 268, "y": 246, "sensor": "role:cpu.load", "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "cpu-graph-caption", "x": 40, "y": 308, "text": "TEMPERATURE · 2 MIN", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "historyGraph", "id": "cpu-graph", "x": 40, "y": 332, "width": 380, "height": 96, "sensor": "role:cpu.temperature", "min": 30, "max": 100, "windowSeconds": 120, "area": true, "grid": true, "color": "#FF5E7E", "trackColor": "#1A1E2E" },
+
+    { "type": "text", "id": "gpu-title", "x": 460, "y": 34, "text": "GPU", "font": { "family": "Inter", "size": 22, "weight": 700 }, "color": "#5EE7FF" },
+    { "type": "arcGauge", "id": "gpu-temp", "x": 460, "y": 78, "width": 200, "height": 200, "sensor": "role:gpu.temperature", "color": "#5EE7FF", "trackColor": "#222739", "thickness": 14, "showValue": true, "font": { "family": "Inter", "size": 40, "weight": 700 } },
+    { "type": "text", "id": "gpu-temp-caption", "x": 560, "y": 210, "text": "TEMP", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3", "align": "center" },
+    { "type": "text", "id": "gpu-power-caption", "x": 688, "y": 92, "text": "POWER", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "gpu-power", "x": 688, "y": 110, "sensor": "role:gpu.power", "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "gpu-clock-caption", "x": 688, "y": 160, "text": "CLOCK", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "gpu-clock", "x": 688, "y": 178, "sensor": "role:gpu.clock", "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "gpu-vram-caption", "x": 688, "y": 228, "text": "VRAM", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "sensor", "id": "gpu-vram-load", "x": 740, "y": 228, "sensor": "role:gpu.memory.load", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#5EE7FF" },
+    { "type": "sensor", "id": "gpu-vram", "x": 688, "y": 246, "sensor": "role:gpu.memory.used", "decimals": 1, "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "text", "id": "gpu-graph-caption", "x": 460, "y": 308, "text": "TEMPERATURE · 2 MIN", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "historyGraph", "id": "gpu-graph", "x": 460, "y": 332, "width": 380, "height": 96, "sensor": "role:gpu.temperature", "min": 30, "max": 100, "windowSeconds": 120, "area": true, "grid": true, "color": "#5EE7FF", "trackColor": "#1A1E2E" },
+
+    { "type": "clock", "id": "time", "x": 1240, "y": 26, "font": { "family": "Inter", "size": 80, "weight": 700 }, "color": "#FFFFFF", "align": "right" },
+    { "type": "clock", "id": "date", "x": 1240, "y": 128, "format": "dddd, d MMMM", "font": { "family": "Inter", "size": 22, "weight": 400 }, "color": "#9AA3C0", "align": "right" },
+    { "type": "text", "id": "ram-title", "x": 880, "y": 308, "text": "MEMORY", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#B48CFF" },
+    { "type": "sensor", "id": "ram-load", "x": 1240, "y": 308, "sensor": "role:memory.load", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3", "align": "right" },
+    { "type": "bar", "id": "ram-bar", "x": 880, "y": 336, "width": 360, "height": 12, "sensor": "role:memory.load", "min": 0, "max": 100, "color": "#B48CFF", "trackColor": "#222739" },
+    { "type": "sensor", "id": "ram-used", "x": 880, "y": 364, "sensor": "role:memory.used", "decimals": 1, "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#FFFFFF" },
+    { "type": "sensor", "id": "ram-free", "x": 1240, "y": 364, "sensor": "role:memory.available", "decimals": 1, "font": { "family": "Inter", "size": 32, "weight": 700 }, "color": "#9AA3C0", "align": "right" },
+    { "type": "text", "id": "ram-used-caption", "x": 880, "y": 408, "text": "USED", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3" },
+    { "type": "text", "id": "ram-free-caption", "x": 1240, "y": 408, "text": "AVAILABLE", "font": { "family": "Inter", "size": 14, "weight": 700 }, "color": "#7C84A3", "align": "right" }
+  ]
+}
