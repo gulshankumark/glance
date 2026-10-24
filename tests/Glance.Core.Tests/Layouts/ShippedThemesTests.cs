@@ -60,8 +60,8 @@ public class ShippedThemesTests
         var l = Load(name);
         var roles = Bindings(l).Select(b => SensorRef.Parse(b).Value).ToHashSet();
         foreach (var role in RequiredRoles) Assert.Contains(role, roles);
-        // The time follows the clock24h setting, so at least one clock has no fixed format.
-        Assert.Contains(l.Items.OfType<ClockItem>(), c => c.Format is null);
+        // Owner's call: the shipped themes show seconds with a fixed format, so they do not follow clock24h.
+        Assert.NotEmpty(l.Items.OfType<ClockItem>());
     }
 
     [Fact]
