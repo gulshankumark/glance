@@ -175,3 +175,17 @@ export async function postBlob(path: string, body: unknown, options: ApiOptions 
 export function setTestPattern(deviceKey: string, on: boolean, options?: ApiOptions): Promise<void> {
   return api<void>(on ? 'POST' : 'DELETE', `/api/devices/${encodeURIComponent(deviceKey)}/test-pattern`, undefined, options);
 }
+
+export interface Notice {
+  id: string;
+  severity: 'warning' | 'error';
+  text: string;
+}
+
+export function getNotices(options?: ApiOptions): Promise<Notice[]> {
+  return api<Notice[]>('GET', '/api/notices', undefined, options);
+}
+
+export function dismissNotice(id: string, options?: ApiOptions): Promise<void> {
+  return api<void>('POST', `/api/notices/${encodeURIComponent(id)}/dismiss`, undefined, options);
+}
