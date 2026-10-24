@@ -69,10 +69,12 @@ s.AddHostedService<CoreRunner>();
 s.AddGlanceSecurity(paths);
 
 var app = builder.Build();
-if (settings.Repairs.Count > 0)
+if (settings.LoadError is not null)
     app.Services.GetRequiredService<NoticeBoard>().Add(new Notice(
         $"settings-repaired-{DateTime.UtcNow:yyyyMMddHHmmss}", "warning",
-        $"Some settings were invalid and were reset: {settings.LoadError}. The original file is settings.json.corrupt."));
+        settings.Repairs.Count > 0
+            ? $"Some settings were invalid and were reset: {settings.LoadError}. The original file is settings.json.corrupt."
+            : $"settings.json could not be read ({settings.LoadError}), so all settings were reset to defaults. The original file is settings.json.corrupt."));
 if (dataDirAcl == DataDirectoryAcl.Outcome.OwnershipTaken)
     app.Logger.LogWarning("The data directory {Root} was owned by another account; ownership was taken and its permissions reset to SYSTEM and Administrators only", paths.Root);
 else if (dataDirAcl == DataDirectoryAcl.Outcome.Tightened)

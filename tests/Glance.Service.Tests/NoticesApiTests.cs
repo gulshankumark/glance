@@ -62,4 +62,41 @@ public class NoticesApiTests
         Assert.Contains("devices.0416:5302.gamma", n.GetProperty("text").GetString());
         Assert.Contains("settings.json.corrupt", n.GetProperty("text").GetString());
     }
+
+    [Fact]
+    public async Task Unparseable_settings_raise_a_notice_at_startup()
+    {
+        await using var f = new GlanceFactory();
+        File.WriteAllText(Path.Combine(f.DataDir, "settings.json"), "this is not json");
+        var c = f.CreateClient();
+        var n = Assert.Single((await c.GetFromJsonAsync<JsonElement>("/api/notices")).EnumerateArray());
+        Assert.StartsWith("settings-repaired-", n.GetProperty("id").GetString());
+        var text = n.GetProperty("text").GetString();
+        Assert.Contains("all settings were reset to defaults", text);
+        Assert.Contains("settings.json.corrupt", text);
+    }
+
+    [Fact]
+    public async Task Dismiss_of_unknown_id_is_noop()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/api/notices/nope/dismiss", null)).StatusCode);
+        Assert.Empty(f.Settings.Current.DismissedNotices);
+    }
+
+    [Fact]
+    public async Task Dismissed_list_is_capped_at_50_newest()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        var board = f.Services.GetRequiredService<NoticeBoard>();
+        for (var i = 0; i < 55; i++)
+        {
+            board.Add(new Notice($"n{i}", "warning", "t"));
+            Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/notices/n{i}/dismiss", null)).StatusCode);
+        }
+        var list = f.Settings.Current.DismissedNotices;
+        Assert.Equal(50, list.Count);
+        Assert.Equal("n5", list[0]);
+        Assert.Equal("n54", list[^1]);
+    }
 }
