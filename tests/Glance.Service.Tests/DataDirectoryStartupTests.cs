@@ -69,6 +69,9 @@ public class DataDirectoryStartupTests
     [Fact]
     public void Enforce_failure_is_rethrown_unchanged_when_the_root_cannot_be_read()
     {
+        // Elevated (the owner's runs, CI's admin runner) the deny entries cannot hide the root: other tests in this
+        // process enable SeBackupPrivilege, which reads through them. The scenario only exists unelevated.
+        if (Glance.Platform.Windows.DataDirectoryAcl.IsElevated()) return;
         using var dir = new TempDir();
         var parent = Directory.CreateDirectory(Path.Combine(dir.Path, "parent")).FullName;
         var paths = new GlancePaths(Path.Combine(parent, "Glance"));
