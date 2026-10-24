@@ -110,6 +110,24 @@ Requirements: Windows 10/11, [.NET 8 SDK](https://dotnet.microsoft.com/download)
 
 Run the tests with `dotnet test` and, for the UI, `npm test` in `web/`.
 
+## Build the installer
+
+Requirements: [.NET 8 SDK](https://dotnet.microsoft.com/download), Node.js (the web UI is built as part of
+publishing), and [Inno Setup 6.3 or newer](https://jrsoftware.org/isinfo.php) (`ISCC.exe` on `PATH` or in
+`C:\Program Files (x86)\Inno Setup 6`). 6.3 is the minimum because the script uses the `x64compatible`
+architecture and the `ExecAndCaptureOutput` function.
+
+```powershell
+./installer/build.ps1 -Version 1.2.3
+```
+
+This publishes a self-contained `win-x64` build to `out/publish` and writes the installer to
+`out/Glance-Setup-1.2.3.exe`. Without `-Version` the version is `0.0.0-dev`.
+
+The installer registers the `Glance` service (LocalSystem, automatic start), creates the hardened
+`%ProgramData%\Glance` data directory, starts the service and waits up to 30 s for it to answer. Uninstalling
+removes the service and shortcuts and asks whether to delete `%ProgramData%\Glance` (a silent uninstall keeps it).
+
 ## Project layout
 
 | Path | What it is |
