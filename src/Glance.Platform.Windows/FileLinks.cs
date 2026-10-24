@@ -70,10 +70,98 @@ internal static partial class FileLinks
         catch { h.Dispose(); throw; }
     }
 
+    /// <summary>
+    /// Opens the entry itself (never what it points to) to read its content and security descriptor through
+    /// <see cref="SecuredEntry.Handle"/>. Null when it does not exist.
+    /// </summary>
+    public static SecuredEntry? OpenToRead(string path)
+    {
+        var h = Open(path, ReadControl | FileReadData | FileReadAttributes);
+        if (h is null)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error is ErrorFileNotFound or ErrorPathNotFound) return null;
+            throw LastError(path, error);
+        }
+        try { return new SecuredEntry(h, path, Query(h, path)); }
+        catch { h.Dispose(); throw; }
+    }
+
+    /// <summary>
+    /// Creates the file at <paramref name="path"/> with <paramref name="descriptor"/> (self-relative) from its first
+    /// moment, writes <paramref name="content"/> and flushes it. Fails when anything, a link included, has that name.
+    /// </summary>
+    public static unsafe void CreateNew(string path, byte[] descriptor, ReadOnlySpan<byte> content)
+    {
+        SafeFileHandle h;
+        int error;
+        fixed (byte* sd = descriptor)
+        {
+            var sa = new SecurityAttributes { Length = (uint)sizeof(SecurityAttributes), Descriptor = (IntPtr)sd };
+            h = CreateFileW(path, GenericWrite, 0, (IntPtr)(&sa), CreateNewDisposition, FileAttributeNormal, IntPtr.Zero);
+            error = Marshal.GetLastPInvokeError();
+        }
+        using (h)
+        {
+            if (h.IsInvalid) throw LastError(path, error);
+            RandomAccess.Write(h, content, 0);
+            if (!FlushFileBuffers(h)) throw LastError(path);
+        }
+    }
+
+    /// <summary>
+    /// Opens the directory itself (never what it points to) as the destination of <see cref="MoveInto"/>. The caller
+    /// checks <see cref="SecuredEntry.Info"/>: a link opened here is the link, so moving into it would land in the link.
+    /// </summary>
+    public static SecuredEntry OpenFolder(string path)
+    {
+        var h = Open(path, FileReadAttributes | FileTraverse) ?? throw LastError(path);
+        try { return new SecuredEntry(h, path, Query(h, path)); }
+        catch { h.Dispose(); throw; }
+    }
+
+    /// <summary>
+    /// Renames the entry at <paramref name="path"/> to <paramref name="newName"/> inside the directory open as
+    /// <paramref name="folder"/> (same volume). The entry is opened itself, so a link moves as the link and its target
+    /// is never opened; the destination is resolved from the folder's handle, not by name. False when
+    /// <paramref name="newName"/> is taken there and <paramref name="replace"/> is off.
+    /// </summary>
+    public static bool MoveInto(string path, SecuredEntry folder, string newName, bool replace = false)
+    {
+        using var h = Open(path, Delete | FileReadAttributes) ?? throw LastError(path);
+        var nameOffset = 2 * IntPtr.Size + 4;   // FILE_RENAME_INFORMATION: BOOLEAN (padded), HANDLE, ULONG, WCHAR[]
+        var nameBytes = newName.Length * 2;
+        var length = nameOffset + nameBytes + 2;
+        var buffer = Marshal.AllocHGlobal(length);
+        var added = false;
+        try
+        {
+            folder.Handle.DangerousAddRef(ref added);
+            var info = new byte[length];
+            info[0] = replace ? (byte)1 : (byte)0;
+            if (IntPtr.Size == 8) BitConverter.TryWriteBytes(info.AsSpan(IntPtr.Size), (long)folder.Handle.DangerousGetHandle());
+            else BitConverter.TryWriteBytes(info.AsSpan(IntPtr.Size), (int)folder.Handle.DangerousGetHandle());
+            BitConverter.TryWriteBytes(info.AsSpan(2 * IntPtr.Size), (uint)nameBytes);
+            System.Text.Encoding.Unicode.GetBytes(newName, info.AsSpan(nameOffset));
+            Marshal.Copy(info, 0, buffer, length);
+            var status = NtSetInformationFile(h, out _, buffer, (uint)length, FileRenameInformation);
+            if (status == 0) return true;
+            if (status == StatusObjectNameCollision) return false;
+            throw LastError(path, (int)RtlNtStatusToDosError(status));
+        }
+        finally
+        {
+            if (added) folder.Handle.DangerousRelease();
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     /// <summary>An entry opened by <see cref="OpenSecurity"/>; <see cref="Info"/> was read through the same handle.</summary>
     public sealed class SecuredEntry(SafeFileHandle handle, string path, Info info) : IDisposable
     {
         public Info Info { get; } = info;
+
+        public SafeFileHandle Handle => handle;
 
         /// <summary>Owner and DACL in self-relative form, or null when they cannot be read.</summary>
         public byte[]? ReadDescriptor()
@@ -133,6 +221,9 @@ internal static partial class FileLinks
         _ => new IOException($"'{path}': {Marshal.GetPInvokeErrorMessage(error)}", unchecked((int)(0x80070000u | (uint)error))),
     };
 
+    private const int FileRenameInformation = 10, StatusObjectNameCollision = unchecked((int)0xC0000035);
+    private const uint FileTraverse = 0x20, FileReadData = 0x1, GenericWrite = 0x40000000;
+    private const uint CreateNewDisposition = 1, FileAttributeNormal = 0x80;
     private const uint FileReadAttributes = 0x80, Delete = 0x10000, ReadControl = 0x20000, WriteDac = 0x40000, WriteOwner = 0x80000;
     private const uint OwnerSecurityInformation = 0x1, DaclSecurityInformation = 0x4;
     private const uint FileShareAll = 0x1 | 0x2 | 0x4, OpenExisting = 3;
@@ -190,4 +281,26 @@ internal static partial class FileLinks
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetKernelObjectSecurity(SafeFileHandle h, uint info, byte[] sd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityAttributes
+    {
+        public uint Length;
+        public IntPtr Descriptor;
+        public int InheritHandle;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool FlushFileBuffers(SafeFileHandle h);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoStatusBlock { public IntPtr Status; public UIntPtr Information; }
+
+    // The native call, because only it takes a destination relative to a directory handle (RootDirectory).
+    [LibraryImport("ntdll.dll")]
+    private static partial int NtSetInformationFile(SafeFileHandle h, out IoStatusBlock status, IntPtr info, uint length, int infoClass);
+
+    [LibraryImport("ntdll.dll")]
+    private static partial uint RtlNtStatusToDosError(int status);
 }

@@ -8,14 +8,16 @@ namespace Glance.Service;
 public static class DataDirectoryStartup
 {
     /// <summary>
-    /// Runs <paramref name="enforce"/> on the data directory when <paramref name="shouldEnforce"/>. A failure is
-    /// written to the service file log (where the installer's "see the log" points) and rethrown unchanged, so the
-    /// service still stops and the Event Log still records it.
+    /// Runs <paramref name="enforce"/> on the data directory, with <paramref name="marker"/> to resume an interrupted
+    /// quarantine, when <paramref name="shouldEnforce"/>. A failure is written to the service file log (where the
+    /// installer's "see the log" points) and rethrown unchanged, so the service still stops and the Event Log still
+    /// records it.
     /// </summary>
-    public static DataDirectoryAcl.AclResult? Enforce(GlancePaths paths, bool shouldEnforce, Func<string, DataDirectoryAcl.AclResult> enforce)
+    public static DataDirectoryAcl.AclResult? Enforce(GlancePaths paths, bool shouldEnforce, ITakeoverMarker marker,
+        Func<string, ITakeoverMarker, DataDirectoryAcl.AclResult> enforce)
     {
         if (!shouldEnforce) return null;
-        try { return enforce(paths.Root); }
+        try { return enforce(paths.Root, marker); }
         catch (Exception ex)
         {
             LogFailure(paths, ex);

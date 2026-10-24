@@ -9,7 +9,30 @@ namespace Glance.Service.Tests;
 
 public class DataDirectoryStartupTests
 {
-    private static DataDirectoryAcl.AclResult Fail(string root) => throw new IOException("boom: the data directory is a link");
+    private static DataDirectoryAcl.AclResult Fail(string root, ITakeoverMarker marker) => throw new IOException("boom: the data directory is a link");
+
+    private sealed class NoMarker : ITakeoverMarker
+    {
+        public string? Read() => null;
+        public void Write(string quarantineDirName) { }
+        public void Clear() { }
+    }
+
+    private static readonly ITakeoverMarker Marker = new NoMarker();
+
+    [Fact]
+    public void Enforce_gets_the_root_and_the_marker()
+    {
+        using var dir = new TempDir();
+        var paths = new GlancePaths(dir.Path);
+        (string Root, ITakeoverMarker Marker)? seen = null;
+        var ok = new DataDirectoryAcl.AclResult(DataDirectoryAcl.Outcome.AlreadySecure, null, []);
+
+        var result = DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, (root, marker) => { seen = (root, marker); return ok; });
+
+        Assert.Same(ok, result);
+        Assert.Equal((paths.Root, Marker), seen);
+    }
 
     [Fact]
     public void Enforce_failure_is_written_to_the_file_log_and_rethrown()
@@ -17,7 +40,7 @@ public class DataDirectoryStartupTests
         using var dir = new TempDir();
         var paths = new GlancePaths(dir.Path);
 
-        var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Fail));
+        var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
 
         Assert.StartsWith("boom", ex.Message);   // rethrown unchanged, so the Event Log still gets it
         var log = Assert.Single(Directory.GetFiles(paths.Logs, "glance-*.log"));
@@ -38,7 +61,7 @@ public class DataDirectoryStartupTests
             psi.ArgumentList.Add(a);
         using (var p = Process.Start(psi)!) { p.StandardOutput.ReadToEnd(); p.WaitForExit(); Assert.Equal(0, p.ExitCode); }
 
-        Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Fail));
+        Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
 
         Assert.Equal("keep", File.ReadAllText(outside));
     }
@@ -58,7 +81,7 @@ public class DataDirectoryStartupTests
         {
             Assert.ThrowsAny<Exception>(() => _ = new DirectoryInfo(paths.Root).Attributes);   // the precondition: no stat
 
-            var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Fail));
+            var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Marker, Fail));
 
             Assert.StartsWith("boom", ex.Message);
         }
@@ -81,6 +104,6 @@ public class DataDirectoryStartupTests
     public void Nothing_is_enforced_when_not_asked()
     {
         using var dir = new TempDir();
-        Assert.Null(DataDirectoryStartup.Enforce(new GlancePaths(dir.Path), shouldEnforce: false, Fail));
+        Assert.Null(DataDirectoryStartup.Enforce(new GlancePaths(dir.Path), shouldEnforce: false, Marker, Fail));
     }
 }

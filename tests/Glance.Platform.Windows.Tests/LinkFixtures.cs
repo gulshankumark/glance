@@ -37,6 +37,16 @@ internal static class LinkFixtures
             .GetSddlForm(System.Security.AccessControl.AccessControlSections.Owner | System.Security.AccessControl.AccessControlSections.Access);
     }
 
+    /// <summary>Sets the entry's owner through its own handle, keeping its DACL (to self needs no privilege; to Administrators, elevation).</summary>
+    public static void SetOwner(string path, System.Security.Principal.SecurityIdentifier owner)
+    {
+        using var h = FileLinks.OpenSecurity(path);
+        var sd = new System.Security.AccessControl.RawSecurityDescriptor(h.ReadDescriptor()!, 0) { Owner = owner };
+        var bytes = new byte[sd.BinaryLength];
+        sd.GetBinaryForm(bytes, 0);
+        h.WriteDescriptor(bytes);
+    }
+
     private static void Mklink(string kind, string link, string target)
     {
         var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };

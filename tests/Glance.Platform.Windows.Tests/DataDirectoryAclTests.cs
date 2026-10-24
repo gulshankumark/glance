@@ -61,7 +61,7 @@ public class DataDirectoryAclTests
         Assert.Equal(expected, DataDirectoryAcl.ShouldEnforce(overridden, elevated));
 
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
-    public void Enforce_takes_ownership_resets_children_and_removes_planted_links()
+    public void Enforce_with_a_trusted_owner_resets_children_and_removes_planted_links()
     {
         Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
         using var dir = new TempDir();
@@ -75,8 +75,9 @@ public class DataDirectoryAclTests
         var target = Directory.CreateDirectory(Path.Combine(dir.Path, "elsewhere"));
         var link = Path.Combine(root, "logs");
         Directory.CreateSymbolicLink(link, target.FullName);
+        LinkFixtures.SetOwner(root, AdminsSid);   // a trusted owner: reset in place (another owner means quarantine)
 
-        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
+        Assert.Equal(DataDirectoryAcl.Outcome.Tightened, DataDirectoryAcl.Enforce(root, new FakeMarker()).Outcome);
 
         Assert.True(DataDirectoryAcl.IsHardened(new DirectoryInfo(root).GetAccessControl()));
         Assert.False(Directory.Exists(link));          // the planted link is gone ...
@@ -85,7 +86,7 @@ public class DataDirectoryAclTests
             .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier));
         Assert.Empty(childRules);                      // only what the root passes down
         Assert.Equal(AdminsSid, new FileInfo(Path.Combine(child.FullName, "a.json")).GetAccessControl().GetOwner(typeof(SecurityIdentifier)));
-        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
+        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root, new FakeMarker()).Outcome);
     }
 
     private static DirectorySecurity CleanDir()
@@ -385,8 +386,8 @@ public class DataDirectoryAclTests
         Directory.CreateDirectory(Path.Combine(root, "layouts"));
         File.WriteAllText(Path.Combine(root, "layouts", "a.json"), "{}");
 
-        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
-        var second = DataDirectoryAcl.Enforce(root);
+        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root, new FakeMarker()).Outcome);
+        var second = DataDirectoryAcl.Enforce(root, new FakeMarker());
 
         Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, second.Outcome);
         Assert.Empty(second.Actions);
@@ -463,7 +464,7 @@ public class DataDirectoryAclTests
             h.WriteDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, AdminsSid));
         Assert.Contains("BU", LinkFixtures.RawSddl(layouts));
 
-        var result = DataDirectoryAcl.Enforce(root.FullName);
+        var result = DataDirectoryAcl.Enforce(root.FullName, new FakeMarker());
 
         Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
         Assert.Contains(result.Actions, a => a.StartsWith("layouts: reset"));
@@ -497,11 +498,12 @@ public class DataDirectoryAclTests
         File.WriteAllText(outside, "keep");
         var before = LinkFixtures.Sddl(outside);
         LinkFixtures.HardLink(Path.Combine(root, "settings.json"), outside);
+        LinkFixtures.SetOwner(root, WindowsIdentity.GetCurrent().User!);   // the takeover: moved aside, then deleted there
 
-        var result = DataDirectoryAcl.Enforce(root);
+        var result = DataDirectoryAcl.Enforce(root, new FakeMarker());
 
-        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
-        Assert.Contains("settings.json: hard link deleted", result.Actions);
+        Assert.Equal(DataDirectoryAcl.Outcome.Quarantined, result.Outcome);
+        Assert.Contains(Path.Combine(Path.GetFileName(result.QuarantineDir)!, "settings.json") + ": hard link deleted", result.Actions);
         Assert.False(File.Exists(Path.Combine(root, "settings.json")));
         Assert.Equal(before, LinkFixtures.Sddl(outside));
     }
@@ -521,8 +523,9 @@ public class DataDirectoryAclTests
         File.WriteAllText(outside, "keep");
         var before = LinkFixtures.Sddl(outside);
         LinkFixtures.HardLink(Path.Combine(sub.FullName, "a.json"), outside);
+        LinkFixtures.SetOwner(root, AdminsSid);   // a trusted owner: reset in place (another owner means quarantine)
 
-        var result = DataDirectoryAcl.Enforce(root);
+        var result = DataDirectoryAcl.Enforce(root, new FakeMarker());
 
         Assert.Contains(Path.Combine("layouts", "a.json") + ": hard link deleted", result.Actions);
         Assert.False(File.Exists(Path.Combine(sub.FullName, "a.json")));
@@ -573,9 +576,10 @@ public class DataDirectoryAclTests
         dir = new TempDir();
         root = Path.Combine(dir.Path, "Glance");
         Directory.CreateDirectory(root);
-        Assert.Equal(DataDirectoryAcl.Outcome.Tightened, DataDirectoryAcl.Enforce(root).Outcome);   // harden the root first
+        using (var h = FileLinks.OpenSecurity(root))   // harden the root first
+            h.WriteDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, AdminsSid));
         arrange(root);
-        return DataDirectoryAcl.Enforce(root);
+        return DataDirectoryAcl.Enforce(root, new FakeMarker());
     }
 
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)

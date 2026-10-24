@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text.RegularExpressions;
 
 namespace Glance.Platform.Windows;
 
@@ -22,14 +23,25 @@ public static partial class DataDirectoryAcl
         AlreadySecure,
         /// <summary>The owner was fine; the DACL (and everything inside) was reset.</summary>
         Tightened,
-        /// <summary>Someone else owned the directory: ownership was taken and everything inside reset (log a warning).</summary>
-        OwnershipTaken,
-        /// <summary>Reserved: the tree was moved aside and rebuilt (not produced yet).</summary>
+        /// <summary>
+        /// Someone else owned the directory (or an earlier takeover was interrupted): ownership was taken and everything
+        /// that was inside moved to <see cref="AclResult.QuarantineDir"/>, so Glance starts from defaults (warn the user).
+        /// </summary>
         Quarantined,
     }
 
-    /// <summary>What <see cref="Enforce"/> did. <paramref name="Actions"/> are human-readable lines for the log.</summary>
+    /// <summary>
+    /// What <see cref="Enforce(string, ITakeoverMarker)"/> did. <paramref name="QuarantineDir"/> is the full path of
+    /// the folder the old contents were moved to (only when Quarantined). <paramref name="Actions"/> are
+    /// human-readable lines for the log.
+    /// </summary>
     public sealed record AclResult(Outcome Outcome, string? QuarantineDir, IReadOnlyList<string> Actions);
+
+    /// <summary>
+    /// Quarantine folder names: <c>quarantine-</c> and the UTC time the takeover began. ASCII digits only, and nothing
+    /// after the Z (<c>$</c> would also allow a final newline).
+    /// </summary>
+    public static readonly Regex QuarantineName = new(@"^quarantine-[0-9]{8}T[0-9]{6}Z\z", RegexOptions.CultureInvariant);
 
     /// <summary>Only the default %ProgramData%\Glance, and only when elevated (only an admin can set an admin owner).</summary>
     public static bool ShouldEnforce(bool dataDirOverridden, bool elevated) => !dataDirOverridden && elevated;
@@ -73,39 +85,101 @@ public static partial class DataDirectoryAcl
     }
 
     /// <summary>
-    /// Makes <paramref name="root"/> hardened (see <see cref="Hardened"/>). When it was not already, everything inside
-    /// is reset too: owned by Administrators and explicit entries dropped so only the root's are inherited, since any
-    /// local user could have planted them before.
-    /// When the root already is hardened, only entries owned by someone else, carrying explicit entries or with an
-    /// unreadable descriptor are reset (the result is then Tightened).
-    /// Either way the tree is walked by <see cref="Walk"/>: each directory is locked by handle before its contents are
-    /// looked at, links are deleted (never followed or re-permissioned; a deletion makes the result Tightened) and no
-    /// descriptor change propagates.
+    /// Makes <paramref name="root"/> hardened (see <see cref="Hardened"/>) and makes sure nothing in it came from
+    /// anyone but SYSTEM or Administrators.
+    /// <para>When the root's owner is SYSTEM/Administrators and no takeover is pending in <paramref name="marker"/>:
+    /// a hardened root keeps its contents and only entries owned by someone else, carrying explicit entries, with
+    /// unreadable descriptors or other inherited entries are reset (Tightened, or AlreadySecure when nothing was);
+    /// otherwise the root and everything inside are reset (Tightened).</para>
+    /// <para>When anyone else owns the root (or its owner cannot be read), its contents may have been planted, and
+    /// resetting their permissions would not make them trustworthy. They are quarantined, in this order, so that a
+    /// crash at any point is resumed at the next start rather than leaving planted files to be trusted:
+    /// (1) write <paramref name="marker"/> with the quarantine folder name <c>quarantine-&lt;UTC yyyyMMddTHHmmssZ&gt;</c>,
+    /// before anything changes; (2) take ownership of the root and harden its DACL, the root only, by handle;
+    /// (3) move every other entry, except existing quarantine folders, into the quarantine folder by renames that
+    /// never follow a link; (4) harden the quarantine tree (Administrators owner, the root's entries inherited,
+    /// explicit entries dropped, links deleted); then walk the root once more as for a hardened root; (5) clear the
+    /// marker. The result is Quarantined with <see cref="AclResult.QuarantineDir"/> set.</para>
+    /// <para>When the marker is set at the start, the takeover resumes at step 2 with the folder it names, whoever
+    /// owns the root: every step can run again.</para>
+    /// Every walk is done by <see cref="Walk"/>: each directory is locked by handle before its contents are looked at,
+    /// links are deleted (never followed or re-permissioned; a deletion makes the result Tightened) and no descriptor
+    /// change propagates.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
-    public static AclResult Enforce(string root)
+    public static AclResult Enforce(string root, ITakeoverMarker marker) => Enforce(root, marker, HandleSteps.Instance);
+
+    internal static AclResult Enforce(string root, ITakeoverMarker marker, IEnforceSteps steps)
     {
         var dir = new DirectoryInfo(root);
         if (dir.Attributes.HasFlag(FileAttributes.ReparsePoint))
             throw new IOException($"The data directory {root} is a link; refusing to use it.");
-        var current = dir.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
-        var actions = new List<string>();
-        if (IsHardened(current))
-        {
-            // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
-            Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
-            var changed = false;
-            Walk(dir, "", isRoot: true, resetAll: false, actions, ref changed, HandleSteps.Instance);
-            return new AclResult(changed ? Outcome.Tightened : Outcome.AlreadySecure, null, actions);
-        }
-        var ownerTrusted = IsTrustedOwner(current.GetOwner(typeof(SecurityIdentifier)));
-
         // To set an owner on objects we cannot open otherwise, and to read link counts whatever a planted DACL says.
         Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege");
-        var removed = false;
-        Walk(dir, "", isRoot: true, resetAll: true, actions, ref removed, HandleSteps.Instance);
-        actions.Add("reset the data directory and everything inside it");
-        return new AclResult(ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken, null, actions);
+        var pending = marker.Read();
+        var actions = new List<string>();
+        if (pending is null)
+        {
+            var current = steps.ReadRoot(dir);
+            if (ReasonFor(current, EntryKind.Root) is null)
+            {
+                // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
+                var changed = false;
+                Walk(dir, "", isRoot: true, resetAll: false, actions, ref changed, steps);
+                return new AclResult(changed ? Outcome.Tightened : Outcome.AlreadySecure, null, actions);
+            }
+            if (current is not null && IsTrustedOwner(new RawSecurityDescriptor(current, 0).Owner))
+            {
+                var removed = false;
+                Walk(dir, "", isRoot: true, resetAll: true, actions, ref removed, steps);
+                actions.Add("reset the data directory and everything inside it");
+                return new AclResult(Outcome.Tightened, null, actions);
+            }
+        }
+
+        var name = pending ?? $"quarantine-{DateTime.UtcNow:yyyyMMdd'T'HHmmss'Z'}";
+        if (pending is null) marker.Write(name);                                         // 1
+        else actions.Add($"resuming the interrupted quarantine into {name}");
+        var ignored = false;
+        steps.Secure(dir, ".", EntryKind.Root, resetAll: true, actions, ref ignored);    // 2
+        var quarantine = MoveAside(dir, name, actions);                                  // 3
+        Walk(quarantine, name, isRoot: false, resetAll: true, actions, ref ignored, steps); // 4
+        Walk(dir, "", isRoot: true, resetAll: false, actions, ref ignored, steps);
+        marker.Clear();                                                                  // 5
+        actions.Add($"moved the data directory's previous contents to {name}");
+        return new AclResult(Outcome.Quarantined, quarantine.FullName, actions);
+    }
+
+    /// <summary>
+    /// Moves every entry of <paramref name="root"/> except quarantine folders into <paramref name="root"/>\<paramref name="name"/>,
+    /// creating it when needed (one already there from an interrupted run is reused). Each entry is renamed through a
+    /// handle on itself, into the folder's own handle: links move as links. An entry whose name is taken in the folder
+    /// gets a ".1", ".2", ... suffix. Only to be called once the root is locked.
+    /// </summary>
+    internal static DirectoryInfo MoveAside(DirectoryInfo root, string name, List<string> actions)
+    {
+        var path = Path.Combine(root.FullName, name);
+        // Planted before the root was locked (the name is guessable): a link here would take the moves elsewhere.
+        if (FileLinks.DeleteIf(path, i => i.IsNameLink || i.IsHardLink) is { } existing && (existing.IsNameLink || existing.IsHardLink))
+            actions.Add($"{name}: link deleted");
+        if (File.Exists(path) && FileLinks.DeleteIf(path, _ => true) is not null)
+            actions.Add($"{name}: a file in the way of the quarantine folder was deleted");
+        Directory.CreateDirectory(path);
+        using var folder = FileLinks.OpenFolder(path);
+        if (folder.Info.ReparseTag is { } tag)
+            throw new IOException($"The quarantine folder {path} is a reparse point (tag 0x{tag:X8}); refusing to move into it.");
+        foreach (var entry in root.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
+        {
+            if (entry is DirectoryInfo && QuarantineName.IsMatch(entry.Name)) continue;   // this one, or an older one
+            var target = entry.Name;
+            for (var n = 1; !FileLinks.MoveInto(entry.FullName, folder, target); n++)
+            {
+                if (n > 1000) throw new IOException($"Could not move {entry.FullName} into {path}: every name is taken.");
+                target = $"{entry.Name}.{n}";
+            }
+            actions.Add(target == entry.Name ? $"{entry.Name}: moved to {name}" : $"{entry.Name}: moved to {Path.Combine(name, target)}");
+        }
+        return new DirectoryInfo(path);
     }
 
     /// <summary>
@@ -154,6 +228,13 @@ public static partial class DataDirectoryAcl
         bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed);
     }
 
+    /// <summary>The steps of <see cref="Enforce(string, ITakeoverMarker, IEnforceSteps)"/>; a seam so tests can watch their order.</summary>
+    internal interface IEnforceSteps : IWalkSteps
+    {
+        /// <summary>The root's owner and DACL in self-relative form, read through its own handle; null when unreadable.</summary>
+        byte[]? ReadRoot(DirectoryInfo root);
+    }
+
     internal enum EntryKind { Root, Directory, File }
 
     /// <summary>
@@ -183,9 +264,17 @@ public static partial class DataDirectoryAcl
     }
 
     /// <summary>The real steps: every read and write goes through a handle on the entry itself, never by name.</summary>
-    internal sealed class HandleSteps : IWalkSteps
+    internal sealed class HandleSteps : IEnforceSteps
     {
         public static readonly HandleSteps Instance = new();
+
+        public byte[]? ReadRoot(DirectoryInfo root)
+        {
+            using var h = FileLinks.OpenSecurity(root.FullName);
+            if (h.Info.ReparseTag is not null)
+                throw new IOException($"The data directory {root.FullName} is a link; refusing to use it.");
+            return h.ReadDescriptor();
+        }
 
         public bool Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
         {
@@ -304,9 +393,9 @@ public static partial class DataDirectoryAcl
         return a is not null && b is not null && Keys(a).SequenceEqual(Keys(b));
     }
 
-    private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);
+    internal static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);
 
-    private static partial class Privileges
+    internal static partial class Privileges
     {
         private const uint SePrivilegeEnabled = 0x2;
         private const uint TokenAdjustPrivileges = 0x20, TokenQuery = 0x8;
