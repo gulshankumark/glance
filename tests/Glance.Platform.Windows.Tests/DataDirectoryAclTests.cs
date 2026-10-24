@@ -228,8 +228,11 @@ public class DataDirectoryAclTests
     {
         public List<string> Calls { get; } = new();
 
-        public void Secure(FileSystemInfo entry, string rel, DataDirectoryAcl.EntryKind kind, bool resetAll, List<string> actions, ref bool changed) =>
+        public bool Secure(FileSystemInfo entry, string rel, DataDirectoryAcl.EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
+        {
             Calls.Add($"secure {kind} {rel}");
+            return true;
+        }
 
         public bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed)
         {
@@ -276,6 +279,64 @@ public class DataDirectoryAclTests
         Assert.False(Directory.Exists(Path.Combine(root, "logs")));
         Assert.True(File.Exists(Path.Combine(root, "a.json")));
         Assert.Equal("keep", File.ReadAllText(outsideFile));
+    }
+
+    /// <summary>The link check misses (as if the entry turned into a link right after it); the real Secure runs.</summary>
+    private sealed class MissedLinkSteps : DataDirectoryAcl.IWalkSteps
+    {
+        public List<string> Secured { get; } = new();
+
+        public bool Secure(FileSystemInfo entry, string rel, DataDirectoryAcl.EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
+        {
+            Secured.Add(rel);
+            // Unelevated: only the directory step can run for real (it deletes before it would write).
+            return kind != DataDirectoryAcl.EntryKind.Directory
+                || DataDirectoryAcl.HandleSteps.Instance.Secure(entry, rel, kind, resetAll, actions, ref changed);
+        }
+
+        public bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed) => false;
+    }
+
+    [Fact]
+    public void Walk_stops_at_a_directory_that_turned_into_a_link()
+    {
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var outside = Directory.CreateDirectory(Path.Combine(dir.Path, "outside")).FullName;
+        File.WriteAllText(Path.Combine(outside, "secret.txt"), "keep");
+        LinkFixtures.Junction(Path.Combine(root, "logs"), outside);
+        var steps = new MissedLinkSteps();
+        var actions = new List<string>();
+        var changed = false;
+
+        DataDirectoryAcl.Walk(new DirectoryInfo(root), "", isRoot: true, resetAll: true, actions, ref changed, steps);   // no DirectoryNotFoundException
+
+        Assert.Equal(new[] { ".", "logs" }, steps.Secured);   // never into the junction's target
+        Assert.Equal(new[] { "logs: link deleted" }, actions);
+        Assert.True(changed);
+        Assert.False(Directory.Exists(Path.Combine(root, "logs")));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(outside, "secret.txt")));
+    }
+
+    [Fact]
+    public void Secure_reports_an_entry_that_turned_into_a_link_and_deletes_it()
+    {
+        using var dir = new TempDir();
+        var target = Directory.CreateDirectory(Path.Combine(dir.Path, "target")).FullName;
+        var junction = Path.Combine(dir.Path, "logs");
+        LinkFixtures.Junction(junction, target);
+        var actions = new List<string>();
+        var changed = false;
+
+        var plain = DataDirectoryAcl.HandleSteps.Instance.Secure(new DirectoryInfo(junction), "logs", DataDirectoryAcl.EntryKind.Directory,
+            resetAll: false, actions, ref changed);
+
+        Assert.False(plain);
+        Assert.False(Directory.Exists(junction));
+        Assert.True(Directory.Exists(target));
+        Assert.Equal(new[] { "logs: link deleted" }, actions);
+        Assert.False(DataDirectoryAcl.HandleSteps.Instance.Secure(new DirectoryInfo(junction), "logs", DataDirectoryAcl.EntryKind.Directory,
+            resetAll: false, actions, ref changed));   // gone by now: also not a directory to walk into
     }
 
     [Fact]

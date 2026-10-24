@@ -144,8 +144,11 @@ public static partial class DataDirectoryAcl
     /// <summary>The steps of <see cref="Walk"/>; a seam so tests can watch their order.</summary>
     internal interface IWalkSteps
     {
-        /// <summary>Resets the entry's owner and DACL when <paramref name="resetAll"/> or when it needs it.</summary>
-        void Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed);
+        /// <summary>
+        /// Resets the entry's owner and DACL when <paramref name="resetAll"/> or when it needs it. False when the entry
+        /// is no plain entry any more (turned into a link, so deleted or left alone, or gone): not to be walked into.
+        /// </summary>
+        bool Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed);
 
         /// <summary>See <see cref="DataDirectoryAcl.RemoveIfLink"/>.</summary>
         bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed);
@@ -164,7 +167,9 @@ public static partial class DataDirectoryAcl
     /// </summary>
     internal static void Walk(DirectoryInfo dir, string relative, bool isRoot, bool resetAll, List<string> actions, ref bool changed, IWalkSteps steps)
     {
-        steps.Secure(dir, relative.Length == 0 ? "." : relative, isRoot ? EntryKind.Root : EntryKind.Directory, resetAll, actions, ref changed);
+        // Stop when it is no plain directory any more: it turned into a link since it was listed (or vanished).
+        if (!steps.Secure(dir, relative.Length == 0 ? "." : relative, isRoot ? EntryKind.Root : EntryKind.Directory, resetAll, actions, ref changed))
+            return;
         var remaining = new List<(FileSystemInfo Entry, string Rel)>();
         foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
         {
@@ -182,25 +187,29 @@ public static partial class DataDirectoryAcl
     {
         public static readonly HandleSteps Instance = new();
 
-        public void Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
+        public bool Secure(FileSystemInfo entry, string rel, EntryKind kind, bool resetAll, List<string> actions, ref bool changed)
         {
-            bool becameLink;
-            using (var h = FileLinks.OpenSecurity(entry.FullName))
+            FileLinks.SecuredEntry handle;
+            try { handle = FileLinks.OpenSecurity(entry.FullName); }
+            catch (FileNotFoundException) when (kind != EntryKind.Root) { return false; }   // gone since it was listed
+            using (var h = handle)
             {
                 if (kind == EntryKind.Root && h.Info.ReparseTag is not null)
                     throw new IOException($"The data directory {entry.FullName} is a link; refusing to use it.");
                 // Checked again through this handle: an entry that became a link is never re-permissioned.
-                becameLink = kind != EntryKind.Root && (h.Info.ReparseTag is not null || h.Info.IsHardLink);
-                if (!becameLink)
+                if (kind == EntryKind.Root || (h.Info.ReparseTag is null && !h.Info.IsHardLink))
                 {
                     var reason = resetAll ? "" : ReasonFor(h.ReadDescriptor(), kind);
-                    if (reason is null) return;
+                    if (reason is null) return true;
                     h.WriteDescriptor(Descriptor(kind, AdminsSid));
                     if (!resetAll) actions.Add($"{rel}: reset ({reason})");
                     changed = true;
+                    return true;
                 }
             }
-            if (becameLink) DataDirectoryAcl.RemoveIfLink(entry, rel, actions, ref changed);
+            // Deleted, or another reparse point left alone: either way not a directory to walk into.
+            DataDirectoryAcl.RemoveIfLink(entry, rel, actions, ref changed);
+            return false;
         }
 
         public bool RemoveIfLink(FileSystemInfo entry, string rel, List<string> actions, ref bool changed) =>
