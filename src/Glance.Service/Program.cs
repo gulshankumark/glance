@@ -20,7 +20,7 @@ var builder = WebApplication.CreateBuilder(args);
 var paths = GlancePaths.Default();
 // Before anything is read from or written to it (settings, keys, logs): only SYSTEM and Administrators may use it.
 var dataDirAcl = DataDirectoryAcl.ShouldEnforce(GlancePaths.IsOverridden, DataDirectoryAcl.IsElevated())
-    ? DataDirectoryAcl.Enforce(paths.Root) : (DataDirectoryAcl.Outcome?)null;
+    ? DataDirectoryAcl.Enforce(paths.Root) : (DataDirectoryAcl.AclResult?)null;
 var settings = new SettingsStore(paths);
 // kestrel.json is rebuilt from settings at every start; a port that cannot be bound must not take the screens down.
 var binding = NetworkConfig.ApplyAtStartup(paths, settings, NetworkConfig.CanBind);
@@ -75,9 +75,13 @@ if (settings.LoadError is not null)
         settings.Repairs.Count > 0
             ? $"Some settings were invalid and were reset: {settings.LoadError}. The original file is settings.json.corrupt."
             : $"settings.json could not be read ({settings.LoadError}), so all settings were reset to defaults. The original file is settings.json.corrupt."));
-if (dataDirAcl == DataDirectoryAcl.Outcome.OwnershipTaken)
+foreach (var action in dataDirAcl?.Actions ?? [])
+    app.Logger.LogInformation("Data directory: {Action}", action);
+if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.OwnershipTaken)
     app.Logger.LogWarning("The data directory {Root} was owned by another account; ownership was taken and its permissions reset to SYSTEM and Administrators only", paths.Root);
-else if (dataDirAcl == DataDirectoryAcl.Outcome.Tightened)
+else if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.Quarantined)
+    app.Logger.LogWarning("The data directory {Root} was moved aside to {Quarantine} and rebuilt", paths.Root, dataDirAcl.QuarantineDir);
+else if (dataDirAcl?.Outcome == DataDirectoryAcl.Outcome.Tightened)
     app.Logger.LogInformation("The data directory {Root} was restricted to SYSTEM and Administrators", paths.Root);
 if (binding == StartupBinding.LoopbackFallback)
     app.Logger.LogError("The web UI could not use port {Port}{Network}; it is on http://localhost:{Fallback} (this computer only) until the network settings change or Glance restarts",

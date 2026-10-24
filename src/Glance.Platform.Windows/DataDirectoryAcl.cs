@@ -24,7 +24,12 @@ public static partial class DataDirectoryAcl
         Tightened,
         /// <summary>Someone else owned the directory: ownership was taken and everything inside reset (log a warning).</summary>
         OwnershipTaken,
+        /// <summary>Reserved: the tree was moved aside and rebuilt (not produced yet).</summary>
+        Quarantined,
     }
+
+    /// <summary>What <see cref="Enforce"/> did. <paramref name="Actions"/> are human-readable lines for the log.</summary>
+    public sealed record AclResult(Outcome Outcome, string? QuarantineDir, IReadOnlyList<string> Actions);
 
     /// <summary>Only the default %ProgramData%\Glance, and only when elevated (only an admin can set an admin owner).</summary>
     public static bool ShouldEnforce(bool dataDirOverridden, bool elevated) => !dataDirOverridden && elevated;
@@ -73,20 +78,76 @@ public static partial class DataDirectoryAcl
     /// (reparse points) removed without following them, since any local user could have planted them before.
     /// Throws when the directory cannot be secured: the caller must not go on using it.
     /// </summary>
-    public static Outcome Enforce(string root)
+    public static AclResult Enforce(string root)
     {
         var dir = new DirectoryInfo(root);
         if (dir.Attributes.HasFlag(FileAttributes.ReparsePoint))
             throw new IOException($"The data directory {root} is a link; refusing to use it.");
         var current = dir.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
-        if (IsHardened(current)) return Outcome.AlreadySecure;
+        var actions = new List<string>();
+        if (IsHardened(current))
+        {
+            // The root can be fine while an interrupted earlier reset left children behind that anyone could have planted.
+            Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");
+            ResetUntrustedChildren(dir, "", actions);
+            return new AclResult(actions.Count == 0 ? Outcome.AlreadySecure : Outcome.Tightened, null, actions);
+        }
         var ownerTrusted = IsTrustedOwner(current.GetOwner(typeof(SecurityIdentifier)));
 
         Privileges.Enable("SeTakeOwnershipPrivilege", "SeRestorePrivilege");   // to set an owner on objects we cannot open otherwise
         dir.SetAccessControl(OwnerOnly<DirectorySecurity>());   // owner first: the old DACL may not let us write a new one
         dir.SetAccessControl(Hardened());
         ResetChildren(dir);
-        return ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken;
+        actions.Add("reset the data directory and everything inside it");
+        return new AclResult(ownerTrusted ? Outcome.Tightened : Outcome.OwnershipTaken, null, actions);
+    }
+
+    /// <summary>
+    /// True when an entry must be reset: not owned by SYSTEM/Administrators, or carrying an explicit (non-inherited)
+    /// access rule. Pure: reads the descriptor only.
+    /// </summary>
+    internal static bool NeedsReset(FileSystemSecurity sec) => ResetReason(sec) is not null;
+
+    private static string? ResetReason(FileSystemSecurity sec)
+    {
+        if (!IsTrustedOwner(sec.GetOwner(typeof(SecurityIdentifier)))) return "owner is not SYSTEM/Administrators";
+        if (sec.GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier)).Count > 0)
+            return "has explicit access entries";
+        return null;
+    }
+
+    /// <summary>Walks without following links; resets only the entries that need it. Links are left to the link handling.</summary>
+    private static void ResetUntrustedChildren(DirectoryInfo dir, string relative, List<string> actions)
+    {
+        foreach (var entry in dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0 }).ToList())
+        {
+            var rel = relative.Length == 0 ? entry.Name : Path.Combine(relative, entry.Name);
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                // Reading or writing a link's ACL through .NET would act on its target, so it is not touched here.
+                actions.Add($"{rel}: link left alone (not followed)");
+                continue;
+            }
+            if (entry is DirectoryInfo sub)
+            {
+                var reason = ResetReason(sub.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+                if (reason is not null)
+                {
+                    sub.SetAccessControl(OwnerOnly<DirectorySecurity>());
+                    sub.SetAccessControl(InheritOnly<DirectorySecurity>());
+                    actions.Add($"{rel}: reset ({reason})");
+                }
+                ResetUntrustedChildren(sub, rel, actions);
+            }
+            else if (entry is FileInfo file)
+            {
+                var reason = ResetReason(file.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+                if (reason is null) continue;
+                file.SetAccessControl(OwnerOnly<FileSecurity>());
+                file.SetAccessControl(InheritOnly<FileSecurity>());
+                actions.Add($"{rel}: reset ({reason})");
+            }
+        }
     }
 
     private static bool IsTrustedOwner(IdentityReference? owner) => owner is SecurityIdentifier sid && (sid == SystemSid || sid == AdminsSid);

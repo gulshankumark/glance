@@ -76,7 +76,7 @@ public class DataDirectoryAclTests
         var link = Path.Combine(root, "logs");
         Directory.CreateSymbolicLink(link, target.FullName);
 
-        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root));
+        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
 
         Assert.True(DataDirectoryAcl.IsHardened(new DirectoryInfo(root).GetAccessControl()));
         Assert.False(Directory.Exists(link));          // the planted link is gone ...
@@ -85,6 +85,115 @@ public class DataDirectoryAclTests
             .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier));
         Assert.Empty(childRules);                      // only what the root passes down
         Assert.Equal(AdminsSid, new FileInfo(Path.Combine(child.FullName, "a.json")).GetAccessControl().GetOwner(typeof(SecurityIdentifier)));
-        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root));
+        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
+    }
+
+    private static DirectorySecurity CleanDir()
+    {
+        var s = new DirectorySecurity();
+        s.SetOwner(AdminsSid);
+        s.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+        return s;
+    }
+
+    [Fact]
+    public void NeedsReset_is_false_for_a_trusted_owner_with_no_explicit_rules()
+    {
+        Assert.False(DataDirectoryAcl.NeedsReset(CleanDir()));
+        var system = CleanDir();
+        system.SetOwner(SystemSid);
+        Assert.False(DataDirectoryAcl.NeedsReset(system));
+    }
+
+    [Fact]
+    public void NeedsReset_is_true_for_an_entry_owned_by_someone_else()
+    {
+        var s = CleanDir();
+        s.SetOwner(WindowsIdentity.GetCurrent().User!);
+        if (s.GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier o && (o == AdminsSid || o == SystemSid))
+            s.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null));
+        Assert.True(DataDirectoryAcl.NeedsReset(s));
+    }
+
+    [Fact]
+    public void NeedsReset_is_true_for_an_explicit_rule_on_directories_and_files()
+    {
+        var s = CleanDir();
+        s.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.Read, AccessControlType.Allow));
+        Assert.True(DataDirectoryAcl.NeedsReset(s));
+
+        var f = new FileSecurity();
+        f.SetOwner(AdminsSid);
+        Assert.False(DataDirectoryAcl.NeedsReset(f));
+        f.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.Read, AccessControlType.Allow));
+        Assert.True(DataDirectoryAcl.NeedsReset(f));
+    }
+
+    private static DataDirectoryAcl.AclResult EnforceHardenedRootWith(Action<string> arrange, out string root, out TempDir dir)
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        dir = new TempDir();
+        root = Path.Combine(dir.Path, "Glance");
+        Directory.CreateDirectory(root);
+        Assert.Equal(DataDirectoryAcl.Outcome.Tightened, DataDirectoryAcl.Enforce(root).Outcome);   // harden the root first
+        arrange(root);
+        return DataDirectoryAcl.Enforce(root);
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Hardened_root_with_child_owned_by_user_resets_child()
+    {
+        var result = EnforceHardenedRootWith(r =>
+        {
+            var f = Path.Combine(r, "settings.json");
+            File.WriteAllText(f, "{}");
+            var sec = new FileSecurity();
+            sec.SetOwner(WindowsIdentity.GetCurrent().User!);
+            new FileInfo(f).SetAccessControl(sec);
+        }, out var root, out var dir);
+        using (dir)
+        {
+            Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
+            Assert.NotEmpty(result.Actions);
+            var after = new FileInfo(Path.Combine(root, "settings.json")).GetAccessControl();
+            Assert.Equal(AdminsSid, after.GetOwner(typeof(SecurityIdentifier)));
+            Assert.Empty(after.GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier)));
+        }
+    }
+
+    [Fact, Trait("Category", "Hardware")]
+    public void Hardened_root_with_child_explicit_ace_resets_child()
+    {
+        var result = EnforceHardenedRootWith(r =>
+        {
+            var sub = Directory.CreateDirectory(Path.Combine(r, "layouts"));
+            var sec = sub.GetAccessControl();
+            sec.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                FileSystemRights.FullControl, AccessControlType.Allow));
+            sub.SetAccessControl(sec);
+        }, out var root, out var dir);
+        using (dir)
+        {
+            Assert.Equal(DataDirectoryAcl.Outcome.Tightened, result.Outcome);
+            Assert.Contains(result.Actions, a => a.Contains("layouts"));
+            Assert.Empty(new DirectoryInfo(Path.Combine(root, "layouts")).GetAccessControl()
+                .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier)));
+        }
+    }
+
+    [Fact, Trait("Category", "Hardware")]
+    public void Hardened_root_with_clean_children_is_AlreadySecure()
+    {
+        var result = EnforceHardenedRootWith(r =>
+        {
+            Directory.CreateDirectory(Path.Combine(r, "layouts"));
+            File.WriteAllText(Path.Combine(r, "layouts", "a.json"), "{}");
+        }, out _, out var dir);
+        using (dir)
+        {
+            Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
+            Assert.Empty(result.Actions);
+        }
     }
 }
