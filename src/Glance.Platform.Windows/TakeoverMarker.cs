@@ -33,9 +33,12 @@ public interface ITakeoverMarker
 /// never what a link points to), reported through <paramref name="warn"/> and read as nothing pending. A user can
 /// neither edit nor delete the trusted file (its DACL denies them, and Users may not delete others' files in
 /// %ProgramData%), so a user can neither forge a resume nor cancel one.</para>
-/// <para>Only a file that positively fails one of those checks is deleted. One that cannot be opened or read (a sharing
-/// violation from a scanner at boot, say) is left alone and the read throws, so startup stops and the next start
-/// resumes the takeover instead of forgetting it.</para>
+/// <para>Only a file that positively fails one of those checks is deleted. When the content cannot be read (a sharing
+/// violation from a scanner at boot, or from a user holding a planted file open), the checks that need no content are
+/// made on the metadata alone: a file that fails them is ignored as above (left in place if it cannot be deleted), so
+/// a user cannot stop the service from starting; a file that passes them is genuine and left alone, and the read
+/// throws, so startup stops and the next start resumes the takeover instead of forgetting it. So does a file whose
+/// metadata cannot be read either.</para>
 /// Every read and ACL write goes through a handle opened on the entry itself, never by name.
 /// </summary>
 public sealed class FileTakeoverMarker(string directory, Action<string>? warn = null) : ITakeoverMarker
@@ -56,11 +59,22 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
     {
         // To open the file whatever a planted DACL says.
         DataDirectoryAcl.Privileges.Enable("SeBackupPrivilege", "SeRestorePrivilege");
-        string? reason, content;
-        using (var entry = FileLinks.OpenToRead(Path))   // a read error propagates: the marker may well be genuine
+        string? reason, content = null;
+        try
         {
+            using var entry = FileLinks.OpenToRead(Path);
             if (entry is null) return null;
-            reason = Untrusted(entry, out content);
+            reason = Untrusted(entry) ?? NotAMarker(entry, out content);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Any user can plant the file and hold it open without sharing, so the content cannot be read. The
+            // metadata still can: a planted file is ignored as before, while a genuine one keeps the error, never
+            // deleted. Should even the metadata fail, that error propagates.
+            using var entry = FileLinks.OpenMetadata(Path);
+            if (entry is null) return null;
+            reason = Untrusted(entry);
+            if (reason is null) throw;
         }
         if (reason is null) return content;
 
@@ -111,10 +125,12 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
         FileLinks.DeleteIf(Path, _ => true);
     }
 
-    /// <summary>Why the opened file cannot be trusted, or null with its <paramref name="content"/> when it can.</summary>
-    private static string? Untrusted(FileLinks.SecuredEntry entry, out string? content)
+    /// <summary>
+    /// Why the opened file cannot be trusted by what it is, its owner and its permissions, or null when it can. Needs
+    /// no access to the content.
+    /// </summary>
+    private static string? Untrusted(FileLinks.SecuredEntry entry)
     {
-        content = null;
         if (entry.Info.ReparseTag is { } tag) return $"it is a link or another reparse point (tag 0x{tag:X8})";
         if (entry.Info.IsHardLink) return "it has more than one name (a hard link)";
         if (entry.ReadDescriptor() is not { } bytes) throw new IOException("The permissions of the takeover marker could not be read.");
@@ -130,7 +146,13 @@ public sealed class FileTakeoverMarker(string directory, Action<string>? warn = 
             if (!DataDirectoryAcl.IsTrustedOwner(known.SecurityIdentifier) && (known.AccessMask & WriteRights) != 0)
                 return $"{known.SecurityIdentifier.Value} may change or delete it";
         }
+        return null;
+    }
 
+    /// <summary>Why the content of the opened file is not a marker, or null with that <paramref name="content"/>.</summary>
+    private static string? NotAMarker(FileLinks.SecuredEntry entry, out string? content)
+    {
+        content = null;
         var buffer = new byte[64];
         var read = RandomAccess.Read(entry.Handle, buffer, 0);
         var text = Encoding.ASCII.GetString(buffer, 0, read);

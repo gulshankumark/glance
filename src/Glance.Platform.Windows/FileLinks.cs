@@ -88,6 +88,24 @@ internal static partial class FileLinks
     }
 
     /// <summary>
+    /// Opens the entry itself (never what it points to) for its attributes and security descriptor only, without
+    /// its content. Sharing modes do not cover these rights, so this succeeds while another handle denies sharing.
+    /// Null when it does not exist.
+    /// </summary>
+    public static SecuredEntry? OpenMetadata(string path)
+    {
+        var h = Open(path, ReadControl | FileReadAttributes);
+        if (h is null)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error is ErrorFileNotFound or ErrorPathNotFound) return null;
+            throw LastError(path, error);
+        }
+        try { return new SecuredEntry(h, path, Query(h, path)); }
+        catch { h.Dispose(); throw; }
+    }
+
+    /// <summary>
     /// Creates the file at <paramref name="path"/> with <paramref name="descriptor"/> (self-relative) from its first
     /// moment, writes <paramref name="content"/> and flushes it. Fails when anything, a link included, has that name.
     /// </summary>
