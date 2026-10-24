@@ -6,6 +6,9 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Glance.Service.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
@@ -22,6 +25,9 @@
        goes stale when Vite replaces the hashed bundle) and added to the publish list from a fresh glob instead.
        Plain build/test never runs npm. -p:SkipWebBuild=true publishes the wwwroot that is already there. -->
   <ItemGroup>
+    <!-- Update, not Include: the Web SDK default Content glob (**\*.json) already picks these up and Include gives NETSDK1022.
+         If default content items are ever disabled, this Update silently matches nothing and the themes stop shipping. -->
+    <Content Update="themes\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Remove="wwwroot\**" />
     <None Remove="wwwroot\**" />
   </ItemGroup>

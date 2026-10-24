@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Nothing later pushes: gh uses GH_TOKEN, git describe/log are local. Keep the token out of .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # windows-latest runs as an administrator, so the elevation-only Hardware tests really run.
+      # Tests that need a real GPU and the PawnIO driver carry Requires=Device and are excluded.
+      - name: Test
+        shell: pwsh
+        run: dotnet test Glance.sln -c Release "--filter" "Requires!=Device"
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:EVENT_NAME -eq 'push') { $v = $env:REF_NAME -replace '^v', '' } else { $v = '0.0.0-dev' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            # Pinned so a new Inno Setup release cannot change a later tag's build unnoticed (6.3 is the minimum).
+            choco install innosetup --version 6.7.1 -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed (exit $LASTEXITCODE)." }
+          }
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: ./installer/build.ps1 -Version "$env:VERSION"
+
+      - name: Checksums
+        id: sums
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $name = "Glance-Setup-$env:VERSION.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "out/$name").Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $PWD 'out/SHA256SUMS.txt'), "$hash  $name`n", [Text.UTF8Encoding]::new($false))
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Render release notes
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SHA256: ${{ steps.sums.outputs.sha256 }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $prev = git describe --tags --abbrev=0 --match "v*" "$env:TAG^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $prev) { $range = "$prev..$env:TAG" } else { $range = $env:TAG }
+          $changes = (git log --oneline $range | ForEach-Object { "- $_" }) -join "`n"
+          $notes = Get-Content -Raw -LiteralPath installer/release-notes.md
+          $notes = $notes.Replace('{{VERSION}}', $env:VERSION).Replace('{{SHA256}}', $env:SHA256).Replace('{{CHANGES}}', $changes)
+          [IO.File]::WriteAllText((Join-Path $PWD 'out/release-notes.md'), $notes, [Text.UTF8Encoding]::new($false))
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $flags = @()
+          if ($env:TAG.Contains('-')) { $flags += '--prerelease' }
+          gh release create "$env:TAG" "out/Glance-Setup-$env:VERSION.exe" "out/SHA256SUMS.txt" --title "Glance $env:VERSION" --notes-file out/release-notes.md @flags
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)." }
+
+      - name: Upload dry-run artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glance-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            out/Glance-Setup-${{ steps.ver.outputs.version }}.exe
+            out/SHA256SUMS.txt
+          if-no-files-found: error

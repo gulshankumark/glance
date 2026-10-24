@@ -24,6 +24,8 @@ public sealed class LhmRoleMap : IRoleMap
         new(Roles.GpuPower, "gpu", SensorKind.Power, new[] { "GPU Package", "GPU Power" }),
         new(Roles.MemoryLoad, "memory", SensorKind.Load, new[] { "Memory" }, "Total Memory"),
         new(Roles.MemoryUsed, "memory", SensorKind.Data, new[] { "Memory Used" }, "Total Memory"),
+        new(Roles.MemoryAvailable, "memory", SensorKind.Data, new[] { "Memory Available" }, "Total Memory"),
+        new(Roles.GpuMemoryUsed, "gpu", SensorKind.Data, new[] { "GPU Memory Used" }),
     };
 
     public string? Match(string role, IReadOnlyList<SensorInfo> sensors)

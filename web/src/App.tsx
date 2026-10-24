@@ -3,6 +3,7 @@ import { navBlocked } from './lib/navGuard';
 import { LiveProvider, useLiveStatus } from './live/LiveProvider';
 import { TemperatureUnitProvider } from './live/TemperatureUnit';
 import { Banner } from './ui/Banner';
+import { NoticeBanner } from './ui/NoticeBanner';
 import { DisplayTab } from './tabs/DisplayTab';
 import { LayoutsTab } from './tabs/LayoutsTab';
 import { SensorsTab } from './tabs/SensorsTab';
@@ -128,6 +129,8 @@ const Shell: React.FC<ShellProps> = ({ baseRoute, navigate }) => {
           </nav>
         </div>
       </header>
+
+      <NoticeBanner />
 
       {liveStatus !== 'open' && (
         <div style={{ maxWidth: '1200px', margin: 'var(--space-3) auto 0', padding: '0 var(--space-4)', width: '100%' }}>

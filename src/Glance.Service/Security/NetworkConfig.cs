@@ -20,7 +20,20 @@ public enum StartupBinding
 /// <summary>How the running service is bound; becomes <see cref="StartupBinding.Configured"/> after a successful network change.</summary>
 public sealed class WebBindingState(StartupBinding mode)
 {
-    public StartupBinding Mode { get; set; } = mode;
+    private int _mode = (int)mode;
+
+    /// <summary>Raised after <see cref="Mode"/> changes value.</summary>
+    public event Action? Changed;
+
+    public StartupBinding Mode
+    {
+        get => (StartupBinding)Volatile.Read(ref _mode);
+        set
+        {
+            if (Interlocked.Exchange(ref _mode, (int)value) == (int)value) return;
+            try { Changed?.Invoke(); } catch { /* subscriber faults must not break callers */ }
+        }
+    }
 }
 
 /// <summary>
@@ -52,6 +65,29 @@ public static class NetworkConfig
     }
 
     public static bool CanBindAll(AppSettings s, Func<IPEndPoint, bool>? canBind = null) => Endpoints(s).All(canBind ?? CanBind);
+
+    /// <summary>
+    /// The port Kestrel actually holds for <paramref name="mode"/>: the loopback fallback always listens on
+    /// <see cref="AppSettings.DefaultPort"/>, whatever <paramref name="configuredPort"/> says. Null when nothing is bound.
+    /// </summary>
+    public static int? HeldPort(StartupBinding mode, int configuredPort) => mode switch
+    {
+        StartupBinding.Configured => configuredPort,
+        StartupBinding.LoopbackFallback => AppSettings.DefaultPort,
+        _ => null,
+    };
+
+    /// <summary>The startup error for a binding other than the configured one, naming the port actually bound; else null.</summary>
+    public static string? StartupMessage(StartupBinding mode, AppSettings s) => mode switch
+    {
+        StartupBinding.LoopbackFallback =>
+            $"The web UI could not use port {s.Port}{(s.NetworkAccess ? " on the network" : "")}; it is on " +
+            $"http://localhost:{HeldPort(mode, s.Port)} (this computer only) until the network settings change or Glance restarts",
+        StartupBinding.None =>
+            $"No web UI: neither port {s.Port} nor the default port {AppSettings.DefaultPort} could be bound. " +
+            "Screens and sensors keep running; free the port and restart Glance",
+        _ => null,
+    };
 
     /// <param name="configuredUsable">False when the configured endpoints cannot work whatever the port (no usable certificate).</param>
     public static StartupBinding ChooseStartupBinding(AppSettings s, bool configuredUsable, Func<IPEndPoint, bool> canBind)

@@ -4,7 +4,7 @@ namespace Glance.Sensors.Windows.Tests;
 
 public class LhmSensorSourceHardwareTests
 {
-    [Fact, Trait("Category", "Hardware")]
+    [Fact, Trait("Category", "Hardware"), Trait("Requires", "Device")]   // needs a real GPU and the PawnIO driver; CI excludes Requires=Device
     public void Discovers_gpu_temperature_with_a_value()
     {
         using var source = new LhmSensorSource(new PawnIo());

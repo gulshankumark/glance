@@ -40,4 +40,17 @@ public class LhmRoleMapTests
                             S("i2","Intel Core i9","cpu","CPU Package",SensorKind.Temperature) };
         Assert.Equal("i2", new LhmRoleMap().Match("cpu.temperature", intel));
     }
+
+    [Fact] public void Memory_available_maps_to_total_memory_data_sensor()
+    {
+        var sensors = new[] { S("v1","Virtual Memory","memory","Memory Available",SensorKind.Data),
+                              S("t1","Total Memory","memory","Memory Available",SensorKind.Data) };
+        Assert.Equal("t1", new LhmRoleMap().Match(Roles.MemoryAvailable, sensors));
+    }
+
+    [Fact] public void Gpu_memory_used_maps_to_gpu_small_data_sensor()
+    {
+        var sensors = new[] { S("g1","GPU","gpu","GPU Memory Used",SensorKind.Data) };
+        Assert.Equal("g1", new LhmRoleMap().Match(Roles.GpuMemoryUsed, sensors));
+    }
 }

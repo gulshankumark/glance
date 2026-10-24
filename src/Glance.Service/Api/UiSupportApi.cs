@@ -38,6 +38,7 @@ public static class UiSupportApi
     /// <summary>The bundled default first, then the installed families sorted case-insensitively without duplicates.</summary>
     private static IReadOnlyList<string> FontFamilies() =>
         SKFontManager.Default.FontFamilies
+            .Append(FontProvider.MonoFamily)   // bundled, so listed even when not installed
             .Where(f => !string.IsNullOrWhiteSpace(f) && !f.Equals(DefaultFont, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)

@@ -17,11 +17,13 @@ public static class Roles
     public const string GpuPower = "gpu.power";
     public const string MemoryLoad = "memory.load";
     public const string MemoryUsed = "memory.used";
+    public const string MemoryAvailable = "memory.available";
+    public const string GpuMemoryUsed = "gpu.memory.used";
 
     public static readonly IReadOnlyList<string> All = new[]
     {
         CpuTemperature, CpuLoad, CpuClock, CpuPowerPackage, CpuPowerCores, CpuFan,
         GpuTemperature, GpuLoad, GpuClock, GpuMemoryClock, GpuMemoryLoad, GpuFan, GpuPower,
-        MemoryLoad, MemoryUsed,
+        MemoryLoad, MemoryUsed, MemoryAvailable, GpuMemoryUsed,
     };
 }

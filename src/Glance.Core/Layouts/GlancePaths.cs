@@ -29,7 +29,10 @@ public sealed class GlancePaths
     public static bool IsOverridden => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GLANCE_DATA"));
 
     /// <summary>GLANCE_DATA if set, else %ProgramData%\Glance.</summary>
-    public static GlancePaths Default() => new(IsOverridden
+    public static GlancePaths Default() => new(DefaultRoot());
+
+    /// <summary>The directory <see cref="Default"/> uses, without creating anything.</summary>
+    public static string DefaultRoot() => IsOverridden
         ? Environment.GetEnvironmentVariable("GLANCE_DATA")!
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Glance"));
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Glance");
 }

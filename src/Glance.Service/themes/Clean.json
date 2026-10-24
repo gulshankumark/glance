@@ -1,0 +1,709 @@
+{
+  "name": "Clean",
+  "width": 1280,
+  "height": 480,
+  "background": {
+    "type": "color",
+    "color": "#0D1117"
+  },
+  "items": [
+    {
+      "type": "text",
+      "text": "CPU",
+      "font": {
+        "family": "Inter",
+        "size": 20,
+        "weight": 700
+      },
+      "color": "#FF7B72",
+      "align": "left",
+      "id": "cpu-title",
+      "x": 48,
+      "y": 66
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:cpu.temperature",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 80,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "left",
+      "id": "cpu-temp",
+      "x": 48,
+      "y": 94
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#FF7B72",
+      "trackColor": "#FF7B72",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "cpu-underline",
+      "x": 48,
+      "y": 214
+    },
+    {
+      "type": "text",
+      "text": "Power",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "cpu-power-package-caption",
+      "x": 48,
+      "y": 230
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:cpu.power.package",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "cpu-power-package",
+      "x": 388,
+      "y": 230
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "cpu-rule-1",
+      "x": 48,
+      "y": 278
+    },
+    {
+      "type": "text",
+      "text": "Clock",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "cpu-clock-caption",
+      "x": 48,
+      "y": 294
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:cpu.clock",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "cpu-clock",
+      "x": 388,
+      "y": 294
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "cpu-rule-2",
+      "x": 48,
+      "y": 342
+    },
+    {
+      "type": "text",
+      "text": "Load",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "cpu-load-caption",
+      "x": 48,
+      "y": 358
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:cpu.load",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "cpu-load",
+      "x": 388,
+      "y": 358
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#FF7B72",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "cpu-meter",
+      "x": 48,
+      "y": 405
+    },
+    {
+      "type": "text",
+      "text": "GPU",
+      "font": {
+        "family": "Inter",
+        "size": 20,
+        "weight": 700
+      },
+      "color": "#3FB950",
+      "align": "left",
+      "id": "gpu-title",
+      "x": 452,
+      "y": 66
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:gpu.temperature",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 80,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "left",
+      "id": "gpu-temp",
+      "x": 452,
+      "y": 94
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#3FB950",
+      "trackColor": "#3FB950",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "gpu-underline",
+      "x": 452,
+      "y": 214
+    },
+    {
+      "type": "text",
+      "text": "Power",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "gpu-power-caption",
+      "x": 452,
+      "y": 230
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:gpu.power",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "gpu-power",
+      "x": 792,
+      "y": 230
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "gpu-rule-1",
+      "x": 452,
+      "y": 278
+    },
+    {
+      "type": "text",
+      "text": "Core clock",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "gpu-clock-caption",
+      "x": 452,
+      "y": 294
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:gpu.clock",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "gpu-clock",
+      "x": 792,
+      "y": 294
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 340,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "gpu-rule-2",
+      "x": 452,
+      "y": 342
+    },
+    {
+      "type": "text",
+      "text": "VRAM",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "gpu-memory-used-caption",
+      "x": 452,
+      "y": 358
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:gpu.memory.used",
+      "showUnit": true,
+      "decimals": 1,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "gpu-memory-used",
+      "x": 792,
+      "y": 358
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:gpu.memory.load",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#3FB950",
+      "align": "right",
+      "id": "gpu-memory-used-load",
+      "x": 668,
+      "y": 360
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:gpu.memory.load",
+      "width": 340,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#3FB950",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "gpu-meter",
+      "x": 452,
+      "y": 405
+    },
+    {
+      "type": "text",
+      "text": "TIME",
+      "font": {
+        "family": "Inter",
+        "size": 20,
+        "weight": 700
+      },
+      "color": "#D2A8FF",
+      "align": "left",
+      "id": "time-title",
+      "x": 856,
+      "y": 66
+    },
+    {
+      "type": "clock",
+      "format": "HH:mm:ss",
+      "timeZone": "local",
+      "font": {
+        "family": "Inter",
+        "size": 80,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "left",
+      "id": "time",
+      "x": 856,
+      "y": 94
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 376,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#D2A8FF",
+      "trackColor": "#D2A8FF",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "time-underline",
+      "x": 856,
+      "y": 214
+    },
+    {
+      "type": "text",
+      "text": "Date",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "time-date-caption",
+      "x": 856,
+      "y": 230
+    },
+    {
+      "type": "clock",
+      "format": "ddd d MMM",
+      "timeZone": "local",
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "date",
+      "x": 1232,
+      "y": 230
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 376,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "time-rule-1",
+      "x": 856,
+      "y": 278
+    },
+    {
+      "type": "text",
+      "text": "RAM available",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "time-ram-free-caption",
+      "x": 856,
+      "y": 294
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:memory.available",
+      "showUnit": true,
+      "decimals": 1,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "time-ram-free",
+      "x": 1232,
+      "y": 294
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 376,
+      "height": 1,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "time-rule-2",
+      "x": 856,
+      "y": 342
+    },
+    {
+      "type": "text",
+      "text": "RAM used",
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#8B949E",
+      "align": "left",
+      "id": "time-ram-used-caption",
+      "x": 856,
+      "y": 358
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:memory.used",
+      "showUnit": true,
+      "decimals": 1,
+      "font": {
+        "family": "Inter",
+        "size": 26,
+        "weight": 700
+      },
+      "color": "#E6EDF3",
+      "align": "right",
+      "id": "time-ram-used",
+      "x": 1232,
+      "y": 358
+    },
+    {
+      "type": "sensor",
+      "sensor": "role:memory.load",
+      "showUnit": true,
+      "decimals": 0,
+      "font": {
+        "family": "Inter",
+        "size": 24,
+        "weight": 400
+      },
+      "color": "#D2A8FF",
+      "align": "right",
+      "id": "time-ram-used-load",
+      "x": 1108,
+      "y": 360
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:memory.load",
+      "width": 376,
+      "height": 3,
+      "min": 0,
+      "max": 100,
+      "color": "#D2A8FF",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "time-meter",
+      "x": 856,
+      "y": 405
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 1,
+      "height": 340,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "divider-1",
+      "x": 420,
+      "y": 66
+    },
+    {
+      "type": "bar",
+      "vertical": false,
+      "rounded": false,
+      "sensor": "role:cpu.load",
+      "width": 1,
+      "height": 340,
+      "min": 0,
+      "max": 100,
+      "color": "#30363D",
+      "trackColor": "#30363D",
+      "thresholds": [],
+      "showValue": false,
+      "font": {
+        "family": "Inter",
+        "size": 32,
+        "weight": 400
+      },
+      "id": "divider-2",
+      "x": 824,
+      "y": 66
+    }
+  ]
+}

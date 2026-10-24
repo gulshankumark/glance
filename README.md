@@ -110,6 +110,79 @@ Requirements: Windows 10/11, [.NET 8 SDK](https://dotnet.microsoft.com/download)
 
 Run the tests with `dotnet test` and, for the UI, `npm test` in `web/`.
 
+## Build the installer
+
+Requirements: [.NET 8 SDK](https://dotnet.microsoft.com/download), Node.js (the web UI is built as part of
+publishing), and [Inno Setup 6.3 or newer](https://jrsoftware.org/isinfo.php) (`ISCC.exe` on `PATH` or in
+`C:\Program Files (x86)\Inno Setup 6`). 6.3 is the minimum because the script uses the `x64compatible`
+architecture and the `ExecAndCaptureOutput` function.
+
+```powershell
+./installer/build.ps1 -Version 1.2.3
+```
+
+This publishes a self-contained `win-x64` build to `out/publish` and writes the installer to
+`out/Glance-Setup-1.2.3.exe`. Without `-Version` the version is `0.0.0-dev`.
+
+The installer registers the `Glance` service (LocalSystem, automatic start), creates the hardened
+`%ProgramData%\Glance` data directory, starts the service and waits up to 30 s for it to answer. Uninstalling
+removes the service and shortcuts and asks whether to delete `%ProgramData%\Glance` (a silent uninstall keeps it).
+
+The install folder must be inside `C:\Program Files`. The service runs as SYSTEM, and folders elsewhere (such as
+`C:\Glance`) can be writable by ordinary users. The wizard refuses any other folder, and a silent install with
+`/DIR=` pointing elsewhere aborts with a non-zero exit code.
+
+### Silent install
+
+`Glance-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=C:\Temp\glance-setup.log` installs with the default
+choices and never opens a browser. Run it from an elevated prompt.
+
+If TRCC is running, the wizard asks you to close it and offers to remove its logon task (`TRCCAppStartup`); it
+never closes TRCC itself. A silent install only notes a running TRCC in the log and leaves TRCC and its logon task
+alone; Glance cannot drive the screen until TRCC is closed.
+
+| Switch | Effect |
+|---|---|
+| `/VERYSILENT` | No wizard and no progress window. |
+| `/SILENT` | No wizard; shows the progress window only. |
+| `/SUPPRESSMSGBOXES` | Answers message boxes with their default. Use with either of the above. |
+| `/NORESTART` | Never restart Windows. Without it, a silent install restarts Windows by itself when PawnIO's setup reports that a restart is needed (rare); the wizard asks first. |
+| `/LOG=<file>` | Writes the setup log to `<file>`. Without it the log still goes to `%TEMP%\Setup Log <date> #<n>.txt`. |
+| `/DIR=<folder>` | Install folder. Must be inside `C:\Program Files`, otherwise setup stops without installing and exits with a non-zero code. |
+| `/TASKS="startmenu,desktopicon"` | Selects exactly these tasks; every task not listed is off. |
+| `/MERGETASKS="desktopicon"` | Adds to or removes from (with `!`) the default tasks, e.g. `/MERGETASKS="desktopicon"` also creates the desktop shortcut. |
+
+Tasks: `pawnio` (download and install the PawnIO driver, on by default; not offered when PawnIO is already
+installed), `startmenu` (Start-menu shortcut, on by default) and `desktopicon` (desktop shortcut, off by default).
+To skip PawnIO use `/MERGETASKS="!pawnio"`. `/TASKS="!pawnio"` also skips it, but turns off every other task too,
+so no Start-menu shortcut is created.
+
+PawnIO is downloaded during setup from its [official release](https://github.com/namazso/PawnIO.Setup/releases)
+(a pinned version, checked against a pinned SHA-256; a file with another hash is never run) and needs internet
+access. Offline, or if the download or PawnIO's own setup fails, Glance still installs and exits `0`: the setup log
+(and, in the wizard, the Finish page) says CPU and motherboard sensors are unavailable until PawnIO is installed from
+<https://pawnio.eu/>. Uninstalling Glance never removes PawnIO.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Installed; the service is running and answered. |
+| `10` | Files installed, but the service could not be registered or did not answer within 30 s. See the setup log and `%ProgramData%\Glance\logs`. Nothing is rolled back. |
+| `7` | Setup stopped before installing because the running Glance service did not stop for an upgrade. |
+| other | Inno Setup's own codes (`1` setup could not start, `2`/`5` cancelled, `3`/`4` fatal error). See the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes). |
+
+A silent uninstall is `"C:\Program Files\Glance\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES`. It keeps
+`%ProgramData%\Glance`.
+
+## Releasing
+
+The owner pushes a `vX.Y.Z` tag. The `Release` workflow (`.github/workflows/release.yml`) runs the tests, builds
+the installer with `installer/build.ps1`, and publishes a GitHub release with `Glance-Setup-X.Y.Z.exe` and
+`SHA256SUMS.txt`. A tag with a `-` suffix (`v0.3.0-rc1`) is published as a pre-release. Running the workflow
+manually (`workflow_dispatch`) is a dry run: it builds version `0.0.0-dev` and uploads the installer and checksums
+as a workflow artifact without creating a release.
+
 ## Project layout
 
 | Path | What it is |

@@ -29,7 +29,7 @@ public sealed class ManagerHarness : IDisposable
         Manager = new DeviceManager(new[] { Driver }, Usb, new NoPorts(),
             conn => new DisplaySession(conn, Layouts, Settings, hub, assets, renderer, fonts, Time,
                 NullLogger<DisplaySession>.Instance),
-            Settings, Time, NullLogger<DeviceManager>.Instance);
+            Settings, n => Layouts.Get(n) is not null, Time, NullLogger<DeviceManager>.Instance);
         Manager.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 

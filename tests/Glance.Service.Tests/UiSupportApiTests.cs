@@ -64,6 +64,16 @@ public class UiSupportApiTests
     }
 
     [Fact]
+    public async Task Fonts_api_lists_JetBrains_Mono()
+    {
+        await using var f = new GlanceFactory(); var c = f.CreateClient();
+        var body = await c.GetFromJsonAsync<JsonElement>("/api/fonts");
+        var families = body.GetProperty("families").EnumerateArray().Select(e => e.GetString()!).ToList();
+        Assert.Equal("Inter", families[0]);
+        Assert.Equal(1, families.Count(x => x.Equals("JetBrains Mono", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public async Task Timezones_start_with_local_and_contain_Asia_Tokyo()
     {
         await using var f = new GlanceFactory(); var c = f.CreateClient();
