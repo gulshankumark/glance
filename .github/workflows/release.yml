@@ -49,7 +49,8 @@ jobs:
         run: |
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and
               -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup -y --no-progress
+            # Pinned so a new Inno Setup release cannot change a later tag's build unnoticed (6.3 is the minimum).
+            choco install innosetup --version 6.7.1 -y --no-progress
             if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed (exit $LASTEXITCODE)." }
           }
 
@@ -78,7 +79,7 @@ jobs:
           SHA256: ${{ steps.sums.outputs.sha256 }}
           TAG: ${{ github.ref_name }}
         run: |
-          $prev = git describe --tags --abbrev=0 "$env:TAG^" 2>$null
+          $prev = git describe --tags --abbrev=0 --match "v*" "$env:TAG^" 2>$null
           if ($LASTEXITCODE -eq 0 -and $prev) { $range = "$prev..$env:TAG" } else { $range = $env:TAG }
           $changes = (git log --oneline $range | ForEach-Object { "- $_" }) -join "`n"
           $notes = Get-Content -Raw -LiteralPath installer/release-notes.md
