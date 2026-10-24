@@ -493,8 +493,8 @@ begin
   begin
     { No = stay on the page, close TRCC and click Next again (retry); Yes = continue anyway. }
     if TrccRunning then
-      Result := MsgBox('TRCC is still running. Glance will show the screen as busy until TRCC is closed.' +
-        #13#10#13#10 + 'Continue anyway? Click No to close TRCC first and try again.',
+      Result := MsgBox('TRCC is still running. Glance will show the screen as busy until TRCC is closed.' + #13#10#13#10 +
+        'Continue anyway? Click No to close TRCC first and try again.',
         mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end
   else if (CurPageID = wpReady) and not WizardSilent then
