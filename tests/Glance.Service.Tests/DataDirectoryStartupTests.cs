@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Glance.Core.Layouts;
 using Glance.Platform.Windows;
 using Glance.Testing;
@@ -39,6 +41,40 @@ public class DataDirectoryStartupTests
         Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Fail));
 
         Assert.Equal("keep", File.ReadAllText(outside));
+    }
+
+    [Fact]
+    public void Enforce_failure_is_rethrown_unchanged_when_the_root_cannot_be_read()
+    {
+        using var dir = new TempDir();
+        var parent = Directory.CreateDirectory(Path.Combine(dir.Path, "parent")).FullName;
+        var paths = new GlancePaths(Path.Combine(parent, "Glance"));
+        var me = WindowsIdentity.GetCurrent().User!;
+        var denyRoot = new FileSystemAccessRule(me, FileSystemRights.ReadAttributes | FileSystemRights.ReadData, AccessControlType.Deny);
+        var denyParent = new FileSystemAccessRule(me, FileSystemRights.ReadData, AccessControlType.Deny);   // no listing either
+        Change(paths.Root, s => s.AddAccessRule(denyRoot));
+        Change(parent, s => s.AddAccessRule(denyParent));
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => _ = new DirectoryInfo(paths.Root).Attributes);   // the precondition: no stat
+
+            var ex = Assert.Throws<IOException>(() => DataDirectoryStartup.Enforce(paths, shouldEnforce: true, Fail));
+
+            Assert.StartsWith("boom", ex.Message);
+        }
+        finally
+        {
+            Change(parent, s => s.RemoveAccessRule(denyParent));
+            Change(paths.Root, s => s.RemoveAccessRule(denyRoot));
+        }
+    }
+
+    private static void Change(string path, Action<DirectorySecurity> change)
+    {
+        var info = new DirectoryInfo(path);
+        var sec = info.GetAccessControl(AccessControlSections.Access);
+        change(sec);
+        info.SetAccessControl(sec);
     }
 
     [Fact]

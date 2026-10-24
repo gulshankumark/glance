@@ -27,15 +27,16 @@ public static class DataDirectoryStartup
     {
         // The directory could not be secured, so its log folder may hold links a local user planted: appending through
         // one would write to a file elsewhere with the service's rights. Only the Event Log gets the failure then.
-        if (new DirectoryInfo(paths.Root).Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
-        if (!DataDirectoryAcl.IsLinkFree(paths.Logs)) return;
+        // Everything here is best effort: nothing it throws may replace the failure the caller rethrows.
         try
         {
+            if (new DirectoryInfo(paths.Root).Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
+            if (!DataDirectoryAcl.IsLinkFree(paths.Logs)) return;
             using var log = new LoggerConfiguration()
                 .WriteTo.File(Path.Combine(paths.Logs, "glance-.log"), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
                 .CreateLogger();
             log.Fatal(failure, "The data directory {Root} could not be secured; Glance cannot start", paths.Root);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }   // the original failure matters more
+        catch (Exception) { }   // whatever it is, the original failure is the one that matters
     }
 }
