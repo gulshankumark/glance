@@ -685,3 +685,37 @@ public class DataDirectoryAclTests
         }
     }
 }
+
+public class CreateHardenedIfMissingTests
+{
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void CreateHardenedIfMissing_creates_hardened_dir()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "Glance");
+        Assert.True(DataDirectoryAcl.CreateHardenedIfMissing(root));
+        Assert.True(DataDirectoryAcl.IsHardened(new DirectoryInfo(root).GetAccessControl()));
+    }
+
+    [Fact, Trait("Category", "Hardware")]
+    public void CreateHardenedIfMissing_leaves_existing_dir_untouched()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        var before = new DirectoryInfo(root).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.All);
+        Assert.False(DataDirectoryAcl.CreateHardenedIfMissing(root));
+        Assert.Equal(before, new DirectoryInfo(root).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.All));
+    }
+
+    [Fact]
+    public void CreateHardenedIfMissing_leaves_an_existing_file_alone()
+    {
+        using var dir = new TempDir();
+        var path = Path.Combine(dir.Path, "Glance");
+        File.WriteAllText(path, "x");
+        Assert.False(DataDirectoryAcl.CreateHardenedIfMissing(path));
+        Assert.Equal("x", File.ReadAllText(path));
+    }
+}

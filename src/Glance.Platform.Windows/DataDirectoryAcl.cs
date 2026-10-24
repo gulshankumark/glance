@@ -66,6 +66,21 @@ public static partial class DataDirectoryAcl
     }
 
     /// <summary>
+    /// Creates <paramref name="root"/> already hardened (the descriptor is set at creation, never by name afterwards) and
+    /// returns true; when anything exists at that path (directory, file or link, even a dangling one) or its parent is
+    /// missing, touches nothing and returns false. An existing directory is the service's own takeover handling to deal with.
+    /// </summary>
+    public static bool CreateHardenedIfMissing(string root)
+    {
+        var parent = Path.GetDirectoryName(Path.GetFullPath(root));
+        if (parent is null || !Directory.Exists(parent)) return false;
+        try { File.GetAttributes(root); return false; }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
+        new DirectoryInfo(root).Create(Hardened());
+        return true;
+    }
+
+    /// <summary>
     /// True when <paramref name="s"/> is owned by SYSTEM or Administrators, is protected from inheritance and has no
     /// entry for anyone but SYSTEM and Administrators, both with full control passed down to everything inside.
     /// </summary>

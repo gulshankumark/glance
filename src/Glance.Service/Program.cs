@@ -15,6 +15,8 @@ using Serilog;
 using Microsoft.AspNetCore.Hosting.Server;
 using Serilog.Events;
 
+if (Cli.TryRun(args) is { } cliExit) return cliExit;
+
 var builder = WebApplication.CreateBuilder(args);
 
 var paths = GlancePaths.Default();
@@ -121,5 +123,6 @@ app.MapNoticesApi();
 app.MapEventsApi();
 app.MapLogsApi();
 app.Run();
+return 0;
 
 public partial class Program;
