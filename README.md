@@ -4,8 +4,18 @@ An open-source, lightweight replacement for **TRCC**, the Thermalright LCD contr
 small USB LCD screens on Thermalright AIO coolers and cases, reads your hardware sensors, and gives you a clean web
 page to design what the screen shows. You can open it on the same PC, or on a phone or laptop on your home network.
 
-> **Status: pre-release.** The core service and web UI work and have been tested on real hardware. There is no
-> installer yet (that is the next milestone), so for now you build and run it from source.
+> **Status: pre-release.** The service, web UI and Windows installer work and have been tested on real hardware.
+> Linux support is the next milestone.
+
+## Install
+
+Download `Glance-Setup-<version>.exe` from [Releases](https://github.com/gulshankumark/glance/releases) and run it.
+The wizard installs Glance as a background service, downloads the [PawnIO](https://pawnio.eu) sensor driver, offers
+to close TRCC and remove its autostart, and opens the web UI when it finishes. Your screen starts with the **Blend**
+theme straight away. For unattended installs see [Silent install](#silent-install).
+
+Windows may show a SmartScreen warning because the installer is not code-signed yet: click **More info**, then
+**Run anyway**. You can check the download against `SHA256SUMS.txt` from the same release.
 
 ## Why Glance exists
 
@@ -32,6 +42,8 @@ browser.
 | New GPUs (e.g. Intel Arc Pro B70) | No values | Supported via LibreHardwareMonitor |
 | Sensors | Misses newer hardware | CPU, GPU, memory, disks, fans, motherboard Super I/O, with friendly names and unit switching (°C/°F) |
 | Backgrounds | Own themes and `.zt` animations | Solid colour, still image, GIF, and imported TRCC `.zt` animations |
+| Built-in themes | Yes | Four 1280×480 themes (Blend, Clean, Gauges, Live graphs) showing CPU, GPU, memory, date and time; freely editable |
+| Install | Desktop app started at logon by a scheduled task | Guided or silent installer; runs as a Windows service |
 | Foreground items | Built-in theme elements | Sensor values, static text, clocks (local or any time zone), images, bar, segmented bar, arc/ring gauge, needle dial, history graph, sparkline |
 | Layout editor | Desktop editor | Drag sensors onto a live preview, multi-select, snapping with guides, align and distribute |
 | Screen rotation | Yes | 0/90/180/270 per screen, separate rotation for imported `.zt` animations |
@@ -84,7 +96,23 @@ Some sensors (CPU package temperature, motherboard Super I/O, fans) need admin r
 [PawnIO](https://pawnio.eu) driver, as LibreHardwareMonitor requires. Without it Glance still runs and shows the
 sensors it can read.
 
-## Build and run
+## Themes
+
+The installer ships four themes, all 1280×480 and showing CPU temperature, power, clock and load, GPU temperature,
+power, core clock, VRAM and load, memory used and available, and the date and time:
+
+| Theme | Look |
+|---|---|
+| **Blend** (default) | Arc gauges for CPU and GPU temperature, load history graphs, large clock and a memory bar |
+| **Clean** | Three columns of big numbers with divider rules and thin bars |
+| **Gauges** | Arc rings for load, a centre clock and a memory bar |
+| **Live graphs** | Monospace (JetBrains Mono) with history graphs for CPU, GPU and memory |
+
+Each theme is copied into `%ProgramData%\Glance\layouts` once. A screen with no layout gets Blend; a screen that
+already has one keeps it. Themes you edit or delete are never overwritten or brought back on upgrade. Pick or edit a
+theme in the web UI's Layouts tab.
+
+## Build and run from source
 
 Requirements: Windows 10/11, [.NET 8 SDK](https://dotnet.microsoft.com/download), Node.js (only to build the UI).
 
@@ -190,16 +218,18 @@ as a workflow artifact without creating a release.
 | `src/Glance.Core` | Layouts, rendering, sensor hub, display sessions, device manager |
 | `src/Glance.Drivers.Thermalright` | HID driver for the `0416:5302` screen |
 | `src/Glance.Sensors.Windows` | LibreHardwareMonitor sensor source |
-| `src/Glance.Platform.Windows` | WIC JPEG codec, data-directory permissions |
-| `src/Glance.Service` | ASP.NET Core host, REST API, security, Windows service |
+| `src/Glance.Platform.Windows` | WIC JPEG codec, data-directory permissions, quarantine, firewall |
+| `src/Glance.Service` | ASP.NET Core host, REST API, security, Windows service, shortcuts |
+| `src/Glance.Service/themes` | The four shipped themes |
+| `installer/` | Inno Setup script and `build.ps1` |
+| `.github/workflows` | Release workflow |
 | `web/` | React web UI |
 | `tools/Glance.Bench` | CPU and render benchmark |
 | `tests/` | Unit, golden-image and service tests |
 
 ## Roadmap
 
-- Installer: sets up the service, fetches PawnIO, offers to remove TRCC's autostart.
-- Curated built-in themes.
+- Code-signed installer.
 - Linux (systemd service, hwmon sensors).
 - More screens, Thermalright and other vendors.
 
