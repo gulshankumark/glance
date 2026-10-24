@@ -304,6 +304,34 @@ public class DataDirectoryAclTests
     }
 
     [Fact]
+    public void A_hardened_root_needs_no_reset()
+    {
+        var root = DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, AdminsSid);
+        Assert.Null(DataDirectoryAcl.ReasonFor(root, DataDirectoryAcl.EntryKind.Root));
+        var system = DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, SystemSid);
+        Assert.Null(DataDirectoryAcl.ReasonFor(system, DataDirectoryAcl.EntryKind.Root));
+        var mine = DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, WindowsIdentity.GetCurrent().User!);
+        Assert.NotNull(DataDirectoryAcl.ReasonFor(mine, DataDirectoryAcl.EntryKind.Root));
+        Assert.NotNull(DataDirectoryAcl.ReasonFor(null, DataDirectoryAcl.EntryKind.Root));
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Enforce_twice_is_AlreadySecure_the_second_time()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Directory.CreateDirectory(Path.Combine(dir.Path, "Glance")).FullName;
+        Directory.CreateDirectory(Path.Combine(root, "layouts"));
+        File.WriteAllText(Path.Combine(root, "layouts", "a.json"), "{}");
+
+        Assert.NotEqual(DataDirectoryAcl.Outcome.AlreadySecure, DataDirectoryAcl.Enforce(root).Outcome);
+        var second = DataDirectoryAcl.Enforce(root);
+
+        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, second.Outcome);
+        Assert.Empty(second.Actions);
+    }
+
+    [Fact]
     public void Descriptors_below_the_root_carry_exactly_what_the_root_passes_down()
     {
         var dirSd = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Directory, AdminsSid), 0);

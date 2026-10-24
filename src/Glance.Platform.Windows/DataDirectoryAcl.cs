@@ -193,7 +193,7 @@ public static partial class DataDirectoryAcl
                 becameLink = kind != EntryKind.Root && (h.Info.ReparseTag is not null || h.Info.IsHardLink);
                 if (!becameLink)
                 {
-                    var reason = resetAll ? "" : ReasonFor(h.ReadDescriptor(), kind != EntryKind.File);
+                    var reason = resetAll ? "" : ReasonFor(h.ReadDescriptor(), kind);
                     if (reason is null) return;
                     h.WriteDescriptor(Descriptor(kind, AdminsSid));
                     if (!resetAll) actions.Add($"{rel}: reset ({reason})");
@@ -256,10 +256,18 @@ public static partial class DataDirectoryAcl
         return false;
     }
 
-    private static string? ReasonFor(byte[]? descriptor, bool directory)
+    /// <summary>Why the entry with <paramref name="descriptor"/> (null: unreadable) must be reset, or null when it is fine.</summary>
+    internal static string? ReasonFor(byte[]? descriptor, EntryKind kind)
     {
         if (descriptor is null) return "security descriptor unreadable";
-        FileSystemSecurity sec = directory ? new DirectorySecurity() : new FileSecurity();
+        if (kind == EntryKind.Root)
+        {
+            // A hardened root's entries are explicit by design: it is fine exactly when it is hardened.
+            var root = new DirectorySecurity();
+            root.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
+            return IsHardened(root) ? null : "not hardened";
+        }
+        FileSystemSecurity sec = kind != EntryKind.File ? new DirectorySecurity() : new FileSecurity();
         sec.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
         return ResetReason(sec);
     }
