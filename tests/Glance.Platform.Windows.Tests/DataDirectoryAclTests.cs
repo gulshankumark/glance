@@ -355,7 +355,8 @@ public class DataDirectoryAclTests
 
         var sddl = LinkFixtures.Sddl(target);
         Assert.StartsWith($"O:{me.Value}", sddl);
-        Assert.Contains("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", sddl);   // protected, inheritable, SYSTEM + Administrators only
+        // Protected and auto-inherited (so new children's entries are stored as inherited), SYSTEM + Administrators only.
+        Assert.Contains("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", sddl);
         Assert.Equal(childBefore, LinkFixtures.RawSddl(child));   // the stored descriptor: nothing propagated
 
         // Clean up: as owner we may still rewrite the DACL.
@@ -484,8 +485,9 @@ public class DataDirectoryAclTests
     {
         var dirSd = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Directory, AdminsSid), 0);
         var fileSd = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.File, AdminsSid), 0);
-        Assert.Equal("O:BAD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)", dirSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
-        Assert.Equal("O:BAD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)", fileSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
+        // AR asks SetKernelObjectSecurity to keep AI; only AI is stored.
+        Assert.Equal("O:BAD:ARAI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)", dirSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
+        Assert.Equal("O:BAD:ARAI(A;ID;FA;;;SY)(A;ID;FA;;;BA)", fileSd.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
     }
 
     [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
@@ -677,12 +679,46 @@ public class DataDirectoryAclTests
         {
             Directory.CreateDirectory(Path.Combine(r, "layouts"));
             File.WriteAllText(Path.Combine(r, "layouts", "a.json"), "{}");
+            // An elevated test token still owns what it creates as the user; the service (SYSTEM) never does.
+            // Owner only: rewriting the whole descriptor would turn the inherited entries into explicit ones.
+            var d = new DirectoryInfo(Path.Combine(r, "layouts"));
+            var ds = new DirectorySecurity(); ds.SetOwner(AdminsSid); d.SetAccessControl(ds);
+            var f = new FileInfo(Path.Combine(r, "layouts", "a.json"));
+            var fs = new FileSecurity(); fs.SetOwner(AdminsSid); f.SetAccessControl(fs);
         }, out _, out var dir);
         using (dir)
         {
-            Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
             Assert.Empty(result.Actions);
+            Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, result.Outcome);
         }
+    }
+
+    [Fact, Trait("Category", "Hardware")]   // needs an elevated test run (owner runs these)
+    public void Root_hardened_without_auto_inheritance_is_rewritten_once_and_its_children_settle()
+    {
+        Assert.True(DataDirectoryAcl.IsElevated(), "run elevated");
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "Glance");
+        Directory.CreateDirectory(root);
+        // As an earlier version wrote it: protected but not auto-inherited, so NTFS stores new children's entries
+        // without the inherited flag.
+        var legacy = new RawSecurityDescriptor(DataDirectoryAcl.Descriptor(DataDirectoryAcl.EntryKind.Root, AdminsSid), 0);
+        legacy.SetFlags(legacy.ControlFlags & ~ControlFlags.DiscretionaryAclAutoInherited);
+        var bytes = new byte[legacy.BinaryLength];
+        legacy.GetBinaryForm(bytes, 0);
+        using (var h = FileLinks.OpenSecurity(root)) h.WriteDescriptor(bytes);
+        var child = Path.Combine(root, "settings.json");
+        File.WriteAllText(child, "{}");
+
+        var first = DataDirectoryAcl.Enforce(root, new FakeMarker());
+        var second = DataDirectoryAcl.Enforce(root, new FakeMarker());
+
+        Assert.Equal(DataDirectoryAcl.Outcome.Tightened, first.Outcome);
+        Assert.Contains("reset the data directory and everything inside it", first.Actions);
+        Assert.Contains("D:PAI(", LinkFixtures.RawSddl(root));
+        Assert.Contains("ID;FA;;;BA)", LinkFixtures.RawSddl(child));   // stored as inherited now
+        Assert.Equal(DataDirectoryAcl.Outcome.AlreadySecure, second.Outcome);
+        Assert.Empty(second.Actions);
     }
 }
 

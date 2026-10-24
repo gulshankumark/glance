@@ -335,8 +335,12 @@ public static partial class DataDirectoryAcl
         var dacl = new RawAcl(GenericAcl.AclRevision, 2);
         dacl.InsertAce(0, new CommonAce(flags, AceQualifier.AccessAllowed, (int)FileSystemRights.FullControl, SystemSid, false, null));
         dacl.InsertAce(1, new CommonAce(flags, AceQualifier.AccessAllowed, (int)FileSystemRights.FullControl, AdminsSid, false, null));
+        // Auto-inherited on the root too: only then does NTFS mark the entries it gives new children as inherited.
+        // Without it a file the service creates later holds them as explicit entries and is reset on every start.
+        // SetKernelObjectSecurity keeps the auto-inherited bit only when the request bit comes with it.
         var control = ControlFlags.DiscretionaryAclPresent | ControlFlags.SelfRelative
-            | (kind == EntryKind.Root ? ControlFlags.DiscretionaryAclProtected : ControlFlags.DiscretionaryAclAutoInherited);
+            | ControlFlags.DiscretionaryAclAutoInherited | ControlFlags.DiscretionaryAclAutoInheritRequired
+            | (kind == EntryKind.Root ? ControlFlags.DiscretionaryAclProtected : 0);
         var sd = new RawSecurityDescriptor(control, owner, null, null, dacl);
         var bytes = new byte[sd.BinaryLength];
         sd.GetBinaryForm(bytes, 0);
@@ -378,7 +382,10 @@ public static partial class DataDirectoryAcl
             // A hardened root's entries are explicit by design: it is fine exactly when it is hardened.
             var root = new DirectorySecurity();
             root.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
-            return IsHardened(root) ? null : "not hardened";
+            if (!IsHardened(root)) return "not hardened";
+            // Hardened by an earlier version without auto-inheritance: rewritten once so new children inherit properly.
+            return new RawSecurityDescriptor(descriptor, 0).ControlFlags.HasFlag(ControlFlags.DiscretionaryAclAutoInherited)
+                ? null : "not auto-inherited";
         }
         FileSystemSecurity sec = kind != EntryKind.File ? new DirectorySecurity() : new FileSecurity();
         sec.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Owner | AccessControlSections.Access);
