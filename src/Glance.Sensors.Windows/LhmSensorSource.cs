@@ -130,8 +130,8 @@ public sealed class LhmSensorSource : ISensorSource
         return status;
     }
 
-    /// <summary>"Core #1", "P-Core #1", "E-Core #1" clocks; not "Bus Speed" or "Cores (Average)".</summary>
-    internal static bool IsCoreClock(SensorType type, string name) => type == SensorType.Clock && name.Contains("Core #");
+    /// <summary>"Core #1", "P-Core #1", "E-Core #1" clocks; not "Bus Speed", "Cores (Average)" or "Core #1 (Effective)".</summary>
+    internal static bool IsCoreClock(SensorType type, string name) => type == SensorType.Clock && name.Contains("Core #") && !name.Contains('(');
 
     /// <summary>LHM SmallData sensors are MB; they are reported as Data in GB (the single conversion point).</summary>
     private static float? ToReportedUnit(ISensor s) => s.SensorType == SensorType.SmallData ? s.Value / 1024f : s.Value;

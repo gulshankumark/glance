@@ -61,6 +61,7 @@ public class LhmSensorSourceReadTests
         cpu.Add("/cpu/clock/0", "Bus Speed", SensorType.Clock, 9999);
         cpu.Add("/cpu/clock/1", "P-Core #1", SensorType.Clock, 5100);
         cpu.Add("/cpu/clock/2", "E-Core #1", SensorType.Clock, 4200);
+        cpu.Add("/cpu/clock/4", "P-Core #1 (Effective)", SensorType.Clock, 5300);
         cpu.Add("/cpu/clock/3", "Cores (Average)", SensorType.Clock, 4650);
         cpu.Add("/cpu/load/1", "CPU Core #1", SensorType.Load, 100);
         using var src = Make(PawnIoStatus.Running, cpu);
