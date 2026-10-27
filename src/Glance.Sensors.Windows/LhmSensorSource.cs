@@ -5,7 +5,7 @@ namespace Glance.Sensors.Windows;
 
 public sealed class LhmSensorSource : ISensorSource
 {
-    private sealed record Entry(ISensor Sensor, string HardwareKind);
+    private sealed record Entry(IHardware Hardware, string HardwareKind, Func<float?> Value);
 
     private readonly Action _close;
     private readonly IReadOnlyList<IHardware> _roots;
@@ -78,9 +78,13 @@ public sealed class LhmSensorSource : ISensorSource
         foreach (var s in hw.Sensors)
         {
             var id = s.Identifier.ToString();
-            if (!_entries.TryAdd(id, new Entry(s, kind))) continue;
+            if (!_entries.TryAdd(id, new Entry(hw, kind, () => ToReportedUnit(s)))) continue;
             list.Add(new SensorInfo(id, hw.Name, kind, s.Name, MapSensorKind(s.SensorType)));
         }
+        // LHM has no max-core clock, only "Cores (Average)"; synthesize one from the per-core clocks.
+        var cores = hw.Sensors.Where(s => IsCoreClock(s.SensorType, s.Name)).ToArray();
+        if (cores.Length > 0 && _entries.TryAdd(hw.Identifier + "/clock/max", new Entry(hw, kind, () => cores.Max(c => c.Value))))
+            list.Add(new SensorInfo(hw.Identifier + "/clock/max", hw.Name, kind, "Cores (Max)", SensorKind.Clock));
         foreach (var sub in hw.SubHardware) Walk(sub, list);
     }
 
@@ -101,10 +105,10 @@ public sealed class LhmSensorSource : ISensorSource
             {
                 result[id] = null;
                 if (!_entries.TryGetValue(id, out var e)) continue;
-                var hw = e.Sensor.Hardware;
+                var hw = e.Hardware;
                 if (!updated.TryGetValue(hw, out var ok)) updated[hw] = ok = TryUpdate(hw);
                 if (!ok) continue;
-                try { result[id] = ApplyPawnIoRule(e.HardwareKind, _pawnIoStatus, ToReportedUnit(e.Sensor)); }
+                try { result[id] = ApplyPawnIoRule(e.HardwareKind, _pawnIoStatus, e.Value()); }
                 catch { }
             }
             return result;
@@ -125,6 +129,9 @@ public sealed class LhmSensorSource : ISensorSource
         if (status == PawnIoStatus.Stopped && pawnIo.TryStart()) status = pawnIo.GetStatus();
         return status;
     }
+
+    /// <summary>"Core #1", "P-Core #1", "E-Core #1" clocks; not "Bus Speed" or "Cores (Average)".</summary>
+    internal static bool IsCoreClock(SensorType type, string name) => type == SensorType.Clock && name.Contains("Core #");
 
     /// <summary>LHM SmallData sensors are MB; they are reported as Data in GB (the single conversion point).</summary>
     private static float? ToReportedUnit(ISensor s) => s.SensorType == SensorType.SmallData ? s.Value / 1024f : s.Value;

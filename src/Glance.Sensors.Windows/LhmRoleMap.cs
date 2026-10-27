@@ -12,6 +12,7 @@ public sealed class LhmRoleMap : IRoleMap
         new(Roles.CpuTemperature, "cpu", SensorKind.Temperature, new[] { "Core (Tctl/Tdie)", "CPU Package" }),
         new(Roles.CpuLoad, "cpu", SensorKind.Load, new[] { "CPU Total" }),
         new(Roles.CpuClock, "cpu", SensorKind.Clock, new[] { "Cores (Average)" }),
+        new(Roles.CpuClockMax, "cpu", SensorKind.Clock, new[] { "Cores (Max)" }),
         new(Roles.CpuPowerPackage, "cpu", SensorKind.Power, new[] { "Package" }),
         new(Roles.CpuPowerCores, "cpu", SensorKind.Power, new[] { "Cores" }),
         new(Roles.CpuFan, "motherboard", SensorKind.Fan, new[] { "CPU Fan" }),
