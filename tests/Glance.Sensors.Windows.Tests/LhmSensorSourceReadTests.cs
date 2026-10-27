@@ -55,6 +55,20 @@ public class LhmSensorSourceReadTests
     static LhmSensorSource Make(PawnIoStatus st, params FakeHardware[] roots) =>
         new(st, () => (roots, () => { }));
 
+    [Fact] public void Synthesizes_max_core_clock_from_per_core_clocks()
+    {
+        var cpu = new FakeHardware("/cpu", "CPU", HardwareType.Cpu);
+        cpu.Add("/cpu/clock/0", "Bus Speed", SensorType.Clock, 9999);
+        cpu.Add("/cpu/clock/1", "P-Core #1", SensorType.Clock, 5100);
+        cpu.Add("/cpu/clock/2", "E-Core #1", SensorType.Clock, 4200);
+        cpu.Add("/cpu/clock/4", "P-Core #1 (Effective)", SensorType.Clock, 5300);
+        cpu.Add("/cpu/clock/3", "Cores (Average)", SensorType.Clock, 4650);
+        cpu.Add("/cpu/load/1", "CPU Core #1", SensorType.Load, 100);
+        using var src = Make(PawnIoStatus.Running, cpu);
+        var max = Assert.Single(src.Discover(), s => s.Name == "Cores (Max)");
+        Assert.Equal(5100, src.Read(new HashSet<string> { max.Id })[max.Id]);
+    }
+
     [Fact] public void Read_updates_only_owning_hardware_including_sub_hardware()
     {
         var mb = new FakeHardware("/mb", "Board", HardwareType.Motherboard);

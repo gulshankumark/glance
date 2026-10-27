@@ -5,6 +5,7 @@ public static class Roles
     public const string CpuTemperature = "cpu.temperature";
     public const string CpuLoad = "cpu.load";
     public const string CpuClock = "cpu.clock";
+    public const string CpuClockMax = "cpu.clock.max";
     public const string CpuPowerPackage = "cpu.power.package";
     public const string CpuPowerCores = "cpu.power.cores";
     public const string CpuFan = "cpu.fan";
@@ -24,6 +25,6 @@ public static class Roles
     {
         CpuTemperature, CpuLoad, CpuClock, CpuPowerPackage, CpuPowerCores, CpuFan,
         GpuTemperature, GpuLoad, GpuClock, GpuMemoryClock, GpuMemoryLoad, GpuFan, GpuPower,
-        MemoryLoad, MemoryUsed, MemoryAvailable, GpuMemoryUsed,
+        MemoryLoad, MemoryUsed, MemoryAvailable, GpuMemoryUsed, CpuClockMax,
     };
 }

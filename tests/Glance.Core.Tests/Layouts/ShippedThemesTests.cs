@@ -107,7 +107,7 @@ public class ShippedThemesTests
     private static readonly Dictionary<string, SensorKind> Kinds = new()
     {
         [Roles.CpuTemperature] = SensorKind.Temperature, [Roles.CpuLoad] = SensorKind.Load,
-        [Roles.CpuClock] = SensorKind.Clock, [Roles.CpuPowerPackage] = SensorKind.Power,
+        [Roles.CpuClock] = SensorKind.Clock, [Roles.CpuClockMax] = SensorKind.Clock, [Roles.CpuPowerPackage] = SensorKind.Power,
         [Roles.CpuPowerCores] = SensorKind.Power, [Roles.CpuFan] = SensorKind.Fan,
         [Roles.GpuTemperature] = SensorKind.Temperature, [Roles.GpuLoad] = SensorKind.Load,
         [Roles.GpuClock] = SensorKind.Clock, [Roles.GpuMemoryClock] = SensorKind.Clock,
@@ -122,7 +122,7 @@ public class ShippedThemesTests
         [Roles.CpuPowerCores] = 61, [Roles.CpuFan] = 1240,
         [Roles.GpuTemperature] = 58, [Roles.GpuLoad] = 71, [Roles.GpuClock] = 2610, [Roles.GpuMemoryClock] = 10501,
         [Roles.GpuMemoryLoad] = 39, [Roles.GpuFan] = 1650, [Roles.GpuPower] = 214,
-        [Roles.MemoryLoad] = 57, [Roles.MemoryUsed] = 18.2, [Roles.MemoryAvailable] = 13.8, [Roles.GpuMemoryUsed] = 6.2,
+        [Roles.MemoryLoad] = 57, [Roles.MemoryUsed] = 18.2, [Roles.MemoryAvailable] = 13.8, [Roles.GpuMemoryUsed] = 6.2, [Roles.CpuClockMax] = 5450,
     };
 
     private static readonly Dictionary<string, double> Widest = new()
@@ -131,7 +131,7 @@ public class ShippedThemesTests
         [Roles.CpuPowerCores] = 230, [Roles.CpuFan] = 2400,
         [Roles.GpuTemperature] = 99, [Roles.GpuLoad] = 100, [Roles.GpuClock] = 3105, [Roles.GpuMemoryClock] = 14001,
         [Roles.GpuMemoryLoad] = 100, [Roles.GpuFan] = 3600, [Roles.GpuPower] = 575,
-        [Roles.MemoryLoad] = 100, [Roles.MemoryUsed] = 127.9, [Roles.MemoryAvailable] = 127.9, [Roles.GpuMemoryUsed] = 31.9,
+        [Roles.MemoryLoad] = 100, [Roles.MemoryUsed] = 127.9, [Roles.MemoryAvailable] = 127.9, [Roles.GpuMemoryUsed] = 31.9, [Roles.CpuClockMax] = 5999,
     };
 
     private sealed class RoleIds : IRoleMap

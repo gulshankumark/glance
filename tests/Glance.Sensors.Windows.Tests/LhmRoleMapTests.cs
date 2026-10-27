@@ -11,6 +11,7 @@ public class LhmRoleMapTests
         S("c2","AMD Ryzen 9 9950X","cpu","Core (Tctl/Tdie)",SensorKind.Temperature),
         S("c3","AMD Ryzen 9 9950X","cpu","CPU Total",SensorKind.Load),
         S("c4","AMD Ryzen 9 9950X","cpu","Cores (Average)",SensorKind.Clock),
+        S("c9","AMD Ryzen 9 9950X","cpu","Cores (Max)",SensorKind.Clock),
         S("c5","AMD Ryzen 9 9950X","cpu","Package",SensorKind.Power),
         S("g1","Intel(R) Arc(TM) Pro B70 Graphics","gpu","GPU Core",SensorKind.Temperature),
         S("g2","Intel(R) Arc(TM) Pro B70 Graphics","gpu","GPU Core",SensorKind.Load),
@@ -26,7 +27,7 @@ public class LhmRoleMapTests
     };
 
     [Theory]
-    [InlineData("cpu.temperature","c2")] [InlineData("cpu.load","c3")] [InlineData("cpu.clock","c4")]
+    [InlineData("cpu.temperature","c2")] [InlineData("cpu.load","c3")] [InlineData("cpu.clock","c4")] [InlineData("cpu.clock.max","c9")]
     [InlineData("cpu.power.package","c5")] [InlineData("cpu.power.cores",null)] [InlineData("cpu.fan",null)]
     [InlineData("gpu.temperature","g1")] [InlineData("gpu.load","g2")] [InlineData("gpu.clock","g3")]
     [InlineData("gpu.memory.clock","g4")] [InlineData("gpu.fan","g5")] [InlineData("gpu.power","g6")]
