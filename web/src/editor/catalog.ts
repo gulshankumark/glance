@@ -4,6 +4,7 @@ const ROLE_LABELS: Record<string, string> = {
   'cpu.temperature': 'CPU temperature',
   'cpu.load': 'CPU load',
   'cpu.clock': 'CPU clock',
+  'cpu.clock.max': 'CPU clock (max core)',
   'cpu.power.package': 'CPU package power',
   'cpu.power.cores': 'CPU cores power',
   'cpu.fan': 'CPU fan',

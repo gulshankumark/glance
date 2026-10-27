@@ -80,7 +80,7 @@ Holds the UI-interest lease (every sensor is read while the UI is in use; see [U
 - `kind`: `temperature|load|clock|power|fan|data|smallData|voltage|control|throughput|other`.
 - `unit`: Celsius-based unit for the kind (`°C`, `%`, `MHz`, `W`, `RPM`, `GB`, `MB`, `V`, `MB/s`) or `null`.
 - `value`: current value or `null` (not read yet, or not finite). `alias`: user alias or `null`.
-- `roles`: every role (`cpu.temperature`, `cpu.load`, `cpu.clock`, `cpu.power.package`, `cpu.power.cores`, `cpu.fan`,
+- `roles`: every role (`cpu.temperature`, `cpu.load`, `cpu.clock`, `cpu.clock.max`, `cpu.power.package`, `cpu.power.cores`, `cpu.fan`,
   `gpu.temperature`, `gpu.load`, `gpu.clock`, `gpu.memory.clock`, `gpu.memory.load`, `gpu.fan`, `gpu.power`,
   `memory.load`, `memory.used`) mapped to the sensor id it resolves to (pins applied) or `null`.
 - `pins`: the persisted role pins (`PUT /api/roles/{role}`) as role to sensor id; a role without a pin is absent (`{}` when none).
